@@ -2,6 +2,7 @@
 
 #define  EPS        1.0e-15
 #define  MAX_ITER   4000
+#define  OUT_ITER   100
 #define  MEASURE_TIME
 #define  DISPLAY_RESIDUAL
 
@@ -103,7 +104,7 @@ int bicgstab(CSR_Matrix *A_loc, INFO_Matrix *A_info, double *x, double *r) {
         k++;
 
 #ifdef DISPLAY_RESIDUAL
-        if (myid == 0 && k % 100 == 0) {
+        if (myid == 0 && k % OUT_ITER == 0) {
             printf("Iteration: %d, Residual: %e\n", k, sqrt(dot_r / dot_zero));
         }
 #endif
@@ -239,7 +240,7 @@ int ca_bicgstab(CSR_Matrix *A_loc, INFO_Matrix *A_info, double *x, double *r) {
 
         MPI_Wait(&dot_r_req, MPI_STATUS_IGNORE);
 #ifdef DISPLAY_RESIDUAL
-        if (myid == 0 && k % 100 == 0) {
+        if (myid == 0 && k % OUT_ITER == 0) {
             printf("Iteration: %d, Residual: %e\n", k, sqrt(dot_r / dot_zero));
         }
 #endif
@@ -382,7 +383,7 @@ int pipe_bicgstab(CSR_Matrix *A_loc, INFO_Matrix *A_info, double *x, double *r) 
 
         MPI_Wait(&dot_r_req, MPI_STATUS_IGNORE);
 #ifdef DISPLAY_RESIDUAL
-        if (myid == 0 && k % 100 == 0) {
+        if (myid == 0 && k % OUT_ITER == 0) {
             printf("Iteration: %d, Residual: %e\n", k, sqrt(dot_r / dot_zero));
         }
 #endif
@@ -549,7 +550,7 @@ int pipe_bicgstab_rr(CSR_Matrix *A_loc, INFO_Matrix *A_info, double *x, double *
 
         MPI_Wait(&dot_r_req, MPI_STATUS_IGNORE);
 #ifdef DISPLAY_RESIDUAL
-        if (myid == 0 && k % 100 == 0) {
+        if (myid == 0 && k % OUT_ITER == 0) {
             printf("Iteration: %d, Residual: %e\n", k, sqrt(dot_r / dot_zero));
         }
 #endif
