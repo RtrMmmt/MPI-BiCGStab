@@ -1,4 +1,4 @@
-// mpicc -O3 src/main.c src/solver.c src/matrix.c src/vector.c src/mmio.c -I src
+// mpicc -O3 src/main.c src/solver.c src/matrix.c src/vector.c src/mmio.c -I src -lm
 // mpirun -np 4 ./a.out data/atmosmodd.mtx bicgstab
 // mpirun -np 4 ./a.out data/atmosmodd.mtx pipe_bicgstab_rr 30 6
 
