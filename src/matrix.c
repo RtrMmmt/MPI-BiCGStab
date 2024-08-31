@@ -623,65 +623,29 @@ void MPI_csr_load_matrix_block(char *filename, CSR_Matrix *matrix_loc_diag, CSR_
 void MPI_csr_spmv(CSR_Matrix *matrix_loc, INFO_Matrix *matrix_info, double *x_loc, double *x, double *y_loc) {
 	int i;
 
-    double start_time, end_time, total_time;
-    double mult_start_time, mult_end_time, mult_time;
-	start_time = MPI_Wtime();
-
 	MPI_Request x_req;
 	MPI_Iallgatherv(x_loc, matrix_loc->rows, MPI_DOUBLE, x, matrix_info->recvcounts, matrix_info->displs, MPI_DOUBLE, MPI_COMM_WORLD, &x_req);
 	MPI_Wait(&x_req, MPI_STATUS_IGNORE);
 
-	mult_start_time = MPI_Wtime();
     for (i = 0; i < matrix_loc->rows; i++) {
         y_loc[i] = 0.0;
     }
 	mult(matrix_loc, x, y_loc);
-	mult_end_time = MPI_Wtime();
-	mult_time = mult_end_time - mult_start_time;
-
-	end_time = MPI_Wtime();
-	total_time = end_time - start_time;
-
-	int myid; MPI_Comm_rank(MPI_COMM_WORLD, &myid);
-	if (myid == 0) {
-		printf("SpMV(s&r) time: %e [sec.], comm: %e [sec.], mult: %e [sec.]\n", 
-				total_time, total_time - mult_time, mult_time);
-	}
 }
 
 void MPI_csr_spmv_ovlap(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info, double *x_loc, double *x, double *y_loc) {
 	int i;
-
-    double start_time, end_time, total_time;
-    double mult_start_time, mult_end_time, mult_time;
-	start_time = MPI_Wtime();
 	
 	MPI_Request x_req;
 	MPI_Iallgatherv(x_loc, matrix_loc_diag->rows, MPI_DOUBLE, x, matrix_info->recvcounts, matrix_info->displs, MPI_DOUBLE, MPI_COMM_WORLD, &x_req);
 
-	mult_start_time = MPI_Wtime();
     for (i = 0; i < matrix_loc_diag->rows; i++) {
         y_loc[i] = 0.0;
     }
 	mult(matrix_loc_diag, x_loc, y_loc);
-	mult_end_time = MPI_Wtime();
-	mult_time = mult_end_time - mult_start_time;
 
 	MPI_Wait(&x_req, MPI_STATUS_IGNORE);
-
-	mult_start_time = MPI_Wtime();
 	mult(matrix_loc_offd, x, y_loc);
-	mult_end_time = MPI_Wtime();
-	mult_time += mult_end_time - mult_start_time;
-
-    end_time = MPI_Wtime();
-    total_time = end_time - start_time;
-
-	int myid; MPI_Comm_rank(MPI_COMM_WORLD, &myid);
-    if (myid == 0) {
-		printf("SpMV(s&r) time: %e [sec.], comm: %e [sec.], mult: %e [sec.]\n", 
-				total_time, total_time - mult_time, mult_time);
-	}
 }
 
 void MPI_csr_spmv_async(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info, double *x_loc, double **x_recv, double *y_loc, int numsend, int myid, int *recv_procs) {
@@ -691,10 +655,6 @@ void MPI_csr_spmv_async(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd
 	MPI_Request req[numsend];
 	MPI_Status stat[numsend];
 	int indices[numsend];
-
-    double start_time, end_time, total_time;
-    double mult_start_time, mult_end_time, mult_time;
-	start_time = MPI_Wtime();
 
 	recvs_outstanding = numsend;
 
@@ -707,18 +667,10 @@ void MPI_csr_spmv_async(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd
         y_loc[row] = 0.0;
     }
 
-	mult_start_time = MPI_Wtime();
-	start_idx = matrix_info->displs[myid];
-	end_idx = start_idx + matrix_info->recvcounts[myid];
 	mult(matrix_loc_diag, x_loc, y_loc);
-	mult_end_time = MPI_Wtime();
-	mult_time = mult_end_time - mult_start_time;
 
     while (recvs_outstanding > 0) {
         MPI_Waitsome(numsend, req, &completed, indices, stat);
-
-		//if (myid == 0) printf("%d\n", completed);
-		mult_start_time = MPI_Wtime();
 
         for (i = 0; i < completed; i++) {
             idx = stat[i].MPI_SOURCE;
@@ -737,19 +689,7 @@ void MPI_csr_spmv_async(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd
                 recvs_outstanding--;
             }
         }
-
-        mult_end_time = MPI_Wtime();
-        mult_time += mult_end_time - mult_start_time;
     }
-
-    end_time = MPI_Wtime();
-    total_time = end_time - start_time;
-
-    if (myid == 0) {
-		printf("SpMV(s&r) time: %e [sec.], comm: %e [sec.], mult: %e [sec.]\n", 
-				total_time, total_time - mult_time, mult_time);
-	}
-
 }
 
 void mult(CSR_Matrix *A_loc, double *x, double *y_loc) {
