@@ -1,5 +1,7 @@
 #include "matrix.h"
 
+//#define DYNAMIC_ROWS
+
 void coo_init_matrix(COO_Matrix *m) {
 	m->val = NULL;
 	m->row = NULL;
@@ -353,6 +355,9 @@ void MPI_coo_load_matrix(char *filename, COO_Matrix *matrix_loc, INFO_Matrix *ma
         nz_per_row[row]++;
     }
 
+	int nz_loc;
+
+#ifdef DYNAMIC_ROWS
     // 各プロセスの担当行数を計算
     int *rows_per_proc = (int *)malloc(numprocs * sizeof(int));
 	int *nz_per_proc = (int *)malloc(numprocs * sizeof(int));
@@ -388,9 +393,33 @@ void MPI_coo_load_matrix(char *filename, COO_Matrix *matrix_loc, INFO_Matrix *ma
 	start_row = my_start_row;
 	end_row = my_end_row;
 
-	int nz_loc = nz_per_proc[myid];
+	nz_loc = nz_per_proc[myid];
 
-	free(nz_per_row); free(rows_per_proc); free(nz_per_proc);
+	free(rows_per_proc); free(nz_per_proc);
+
+#else
+    int rows_per_proc = m / numprocs;
+    int extra_rows = m % numprocs;
+    int start_row = myid * rows_per_proc + (myid < extra_rows ? myid : extra_rows);
+    int end_row = start_row + rows_per_proc + (myid < extra_rows ? 1 : 0);
+
+    for (int proc = 0; proc < numprocs; proc++) {
+        int proc_rows_per_proc = m / numprocs;
+        int proc_extra_rows = m % numprocs;
+        int proc_start_row = proc * proc_rows_per_proc + (proc < proc_extra_rows ? proc : proc_extra_rows);
+        int proc_end_row = proc_start_row + proc_rows_per_proc + (proc < proc_extra_rows ? 1 : 0);
+        
+        matrix_info->recvcounts[proc] = proc_end_row - proc_start_row;
+        matrix_info->displs[proc] = proc_start_row;
+    }
+
+    nz_loc = 0;
+    for (int i = start_row; i < end_row; i++) {
+        nz_loc += nz_per_row[i];
+    }
+#endif
+
+	free(nz_per_row); 
 
     matrix_loc->rows = end_row - start_row;
     matrix_loc->cols = n;
@@ -406,15 +435,22 @@ void MPI_coo_load_matrix(char *filename, COO_Matrix *matrix_loc, INFO_Matrix *ma
 
     nz_loc = 0;
     for (int i = 0; i < nz; i++) {
-        if (mm_is_pattern(code)) {
-            fscanf(file, "%d %d\n", &row, &col);
-            val = 1.0;
-        } else if (mm_is_real(code)) {
-            fscanf(file, "%d %d %lg\n", &row, &col, &val);
-        } else if (mm_is_integer(code)) {
-            fscanf(file, "%d %d %d\n", &row, &col, &ival);
-            val = (double)ival;
-        }
+		if (mm_is_pattern(code)) {
+			if (fscanf(file, "%d %d\n", &row, &col) < 2) {
+				fprintf(stderr, "ERROR: reading matrix data.\n");
+				exit(EXIT_FAILURE);
+			}
+		} else if (mm_is_real(code)) {
+			if (fscanf(file, "%d %d %lg\n", &row, &col, &val) < 3) {
+				fprintf(stderr, "ERROR: reading matrix data.\n");
+				exit(EXIT_FAILURE);
+			}
+		} else if (mm_is_integer(code)) {
+			if (fscanf(file, "%d %d %d\n", &row, &col, &ival) < 3) {
+				fprintf(stderr, "ERROR: reading matrix data.\n");
+				exit(EXIT_FAILURE);
+			}
+		}
         row--; col--;
         if (row >= start_row && row < end_row) {
             matrix_loc->row[nz_loc] = row - start_row;
@@ -434,4 +470,317 @@ void MPI_csr_load_matrix(char *filename, CSR_Matrix *matrix_loc, INFO_Matrix *ma
 	csr_init_matrix(matrix_loc);
 	coo2csr(temp, matrix_loc);
     coo_free_matrix(temp); free(temp);
+}
+
+void MPI_coo_load_matrix_block(char *filename, COO_Matrix *matrix_loc_diag, COO_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info) {
+    int numprocs, myid;
+    MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
+    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+
+    int m, n, nz;
+
+    FILE *file;
+    MM_typecode code;
+
+    file = fopen(filename, "r");
+
+    if (mm_read_banner(file, &code) != 0) {
+        fprintf(stderr, "ERROR: Could not process Matrix Market banner.\n");
+        exit(EXIT_FAILURE);
+    }
+    if ((mm_read_mtx_crd_size(file, &m, &n, &nz)) != 0) {
+        fprintf(stderr, "ERROR: Could not read matrix size.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    matrix_info->nz = nz;
+    matrix_info->rows = m;
+    matrix_info->cols = n;
+    strncpy(matrix_info->code, code, sizeof(MM_typecode));
+
+    int rows_per_proc = m / numprocs;
+    int extra_rows = m % numprocs;
+    int start_row = myid * rows_per_proc + (myid < extra_rows ? myid : extra_rows);
+    int end_row = start_row + rows_per_proc + (myid < extra_rows ? 1 : 0);
+
+    for (int proc = 0; proc < numprocs; proc++) {
+        int proc_rows_per_proc = m / numprocs;
+        int proc_extra_rows = m % numprocs;
+        int proc_start_row = proc * proc_rows_per_proc + (proc < proc_extra_rows ? proc : proc_extra_rows);
+        int proc_end_row = proc_start_row + proc_rows_per_proc + (proc < proc_extra_rows ? 1 : 0);
+        
+        matrix_info->recvcounts[proc] = proc_end_row - proc_start_row;
+        matrix_info->displs[proc] = proc_start_row;
+    }
+
+    int row, col, ival;
+    double val;
+
+	int nz_loc_diag = 0, nz_loc_offd = 0;
+
+	for (int i = 0; i < nz; i++) {
+		if (mm_is_pattern(code)) {
+			if (fscanf(file, "%d %d\n", &row, &col) < 2) {
+				fprintf(stderr, "ERROR: reading matrix data.\n");
+				exit(EXIT_FAILURE);
+			}
+		} else if (mm_is_real(code)) {
+			if (fscanf(file, "%d %d %lg\n", &row, &col, &val) < 3) {
+				fprintf(stderr, "ERROR: reading matrix data.\n");
+				exit(EXIT_FAILURE);
+			}
+		} else if (mm_is_integer(code)) {
+			if (fscanf(file, "%d %d %d\n", &row, &col, &ival) < 3) {
+				fprintf(stderr, "ERROR: reading matrix data.\n");
+				exit(EXIT_FAILURE);
+			}
+		}
+
+		row--;  // 0-indexed に調整
+		col--;  // 0-indexed に調整
+
+		if (row >= start_row && row < end_row && col >= start_row && col < end_row) {
+			nz_loc_diag++;
+		} else if (row >= start_row && row < end_row) {
+			nz_loc_offd++;
+		}
+	}
+
+    matrix_loc_diag->rows = end_row - start_row;
+    matrix_loc_diag->cols = end_row - start_row;
+    matrix_loc_diag->nz = nz_loc_diag;
+    matrix_loc_diag->val = (double *)malloc(nz_loc_diag * sizeof(double));
+    matrix_loc_diag->row = (unsigned int *)malloc(nz_loc_diag * sizeof(unsigned int));
+    matrix_loc_diag->col = (unsigned int *)malloc(nz_loc_diag * sizeof(unsigned int));
+
+    matrix_loc_offd->rows = end_row - start_row;
+    matrix_loc_offd->cols = n;
+    matrix_loc_offd->nz = nz_loc_offd;
+    matrix_loc_offd->val = (double *)malloc(nz_loc_offd * sizeof(double));
+    matrix_loc_offd->row = (unsigned int *)malloc(nz_loc_offd * sizeof(unsigned int));
+    matrix_loc_offd->col = (unsigned int *)malloc(nz_loc_offd * sizeof(unsigned int));
+
+    fseek(file, 0, SEEK_SET);
+    mm_read_banner(file, &code); // バナーを再度読み込み
+    mm_read_mtx_crd_size(file, &m, &n, &nz); // 行列サイズを再度読み込み
+
+    int diag_idx = 0, offd_idx = 0;
+    for (int i = 0; i < nz; i++) {
+        if (mm_is_pattern(code)) {
+            if (fscanf(file, "%d %d\n", &row, &col) < 2) {
+                fprintf(stderr, "ERROR: reading matrix data.\n");
+                exit(EXIT_FAILURE);
+            }
+        } else if (mm_is_real(code)) {
+            if (fscanf(file, "%d %d %lg\n", &row, &col, &val) < 3) {
+                fprintf(stderr, "ERROR: reading matrix data.\n");
+                exit(EXIT_FAILURE);
+            }
+        } else if (mm_is_integer(code)) {
+            if (fscanf(file, "%d %d %d\n", &row, &col, &ival) < 3) {
+                fprintf(stderr, "ERROR: reading matrix data.\n");
+                exit(EXIT_FAILURE);
+            }
+        }
+        row--; col--;
+        if (row >= start_row && row < end_row) {
+            if (col >= start_row && col < end_row) {
+                matrix_loc_diag->row[diag_idx] = row - start_row;
+                matrix_loc_diag->col[diag_idx] = col - start_row;
+                matrix_loc_diag->val[diag_idx] = val;
+                diag_idx++;
+            } else {
+                matrix_loc_offd->row[offd_idx] = row - start_row;
+                matrix_loc_offd->col[offd_idx] = col;
+                matrix_loc_offd->val[offd_idx] = val;
+                offd_idx++;
+            }
+        }
+    }
+
+    fclose(file);
+}
+
+void MPI_csr_load_matrix_block(char *filename, CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info) {
+    COO_Matrix *temp_diag = (COO_Matrix *)malloc(sizeof(COO_Matrix));
+    COO_Matrix *temp_offd = (COO_Matrix *)malloc(sizeof(COO_Matrix));
+    
+    coo_init_matrix(temp_diag);
+    coo_init_matrix(temp_offd);
+
+    MPI_coo_load_matrix_block(filename, temp_diag, temp_offd, matrix_info);
+
+    csr_init_matrix(matrix_loc_diag);
+    coo2csr(temp_diag, matrix_loc_diag);
+
+    csr_init_matrix(matrix_loc_offd);
+    coo2csr(temp_offd, matrix_loc_offd);
+
+    coo_free_matrix(temp_diag); free(temp_diag); 
+    coo_free_matrix(temp_offd); free(temp_offd);
+}
+
+void MPI_csr_spmv(CSR_Matrix *matrix_loc, INFO_Matrix *matrix_info, double *x_loc, double *x, double *y_loc) {
+	int i;
+
+    double start_time, end_time, total_time;
+    double mult_start_time, mult_end_time, mult_time;
+	start_time = MPI_Wtime();
+
+	MPI_Request x_req;
+	MPI_Iallgatherv(x_loc, matrix_loc->rows, MPI_DOUBLE, x, matrix_info->recvcounts, matrix_info->displs, MPI_DOUBLE, MPI_COMM_WORLD, &x_req);
+	MPI_Wait(&x_req, MPI_STATUS_IGNORE);
+
+	mult_start_time = MPI_Wtime();
+    for (i = 0; i < matrix_loc->rows; i++) {
+        y_loc[i] = 0.0;
+    }
+	mult(matrix_loc, x, y_loc);
+	mult_end_time = MPI_Wtime();
+	mult_time = mult_end_time - mult_start_time;
+
+	end_time = MPI_Wtime();
+	total_time = end_time - start_time;
+
+	int myid; MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+	if (myid == 0) {
+		printf("SpMV(s&r) time: %e [sec.], comm: %e [sec.], mult: %e [sec.]\n", 
+				total_time, total_time - mult_time, mult_time);
+	}
+}
+
+void MPI_csr_spmv_ovlap(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info, double *x_loc, double *x, double *y_loc) {
+	int i;
+
+    double start_time, end_time, total_time;
+    double mult_start_time, mult_end_time, mult_time;
+	start_time = MPI_Wtime();
+	
+	MPI_Request x_req;
+	MPI_Iallgatherv(x_loc, matrix_loc_diag->rows, MPI_DOUBLE, x, matrix_info->recvcounts, matrix_info->displs, MPI_DOUBLE, MPI_COMM_WORLD, &x_req);
+
+	mult_start_time = MPI_Wtime();
+    for (i = 0; i < matrix_loc_diag->rows; i++) {
+        y_loc[i] = 0.0;
+    }
+	mult(matrix_loc_diag, x_loc, y_loc);
+	mult_end_time = MPI_Wtime();
+	mult_time = mult_end_time - mult_start_time;
+
+	MPI_Wait(&x_req, MPI_STATUS_IGNORE);
+
+	mult_start_time = MPI_Wtime();
+	mult(matrix_loc_offd, x, y_loc);
+	mult_end_time = MPI_Wtime();
+	mult_time += mult_end_time - mult_start_time;
+
+    end_time = MPI_Wtime();
+    total_time = end_time - start_time;
+
+	int myid; MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+    if (myid == 0) {
+		printf("SpMV(s&r) time: %e [sec.], comm: %e [sec.], mult: %e [sec.]\n", 
+				total_time, total_time - mult_time, mult_time);
+	}
+}
+
+void MPI_csr_spmv_async(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info, double *x_loc, double **x_recv, double *y_loc, int numsend, int myid, int *recv_procs) {
+	int i, j, recvs_outstanding, completed, idx, recv_idx, start_idx, end_idx;
+	int row, col_idx;
+	
+	MPI_Request req[numsend];
+	MPI_Status stat[numsend];
+	int indices[numsend];
+
+    double start_time, end_time, total_time;
+    double mult_start_time, mult_end_time, mult_time;
+	start_time = MPI_Wtime();
+
+	recvs_outstanding = numsend;
+
+    for (i = 0; i < numsend; i++) {
+        MPI_Isend(x_loc, matrix_info->recvcounts[myid], MPI_DOUBLE, recv_procs[i], 0, MPI_COMM_WORLD, &req[i]);
+        MPI_Irecv(x_recv[i], matrix_info->recvcounts[recv_procs[i]], MPI_DOUBLE, recv_procs[i], 0, MPI_COMM_WORLD, &req[i]);
+    }
+
+    for (row = 0; row < matrix_loc_diag->rows; row++) {
+        y_loc[row] = 0.0;
+    }
+
+	mult_start_time = MPI_Wtime();
+	start_idx = matrix_info->displs[myid];
+	end_idx = start_idx + matrix_info->recvcounts[myid];
+	mult(matrix_loc_diag, x_loc, y_loc);
+	mult_end_time = MPI_Wtime();
+	mult_time = mult_end_time - mult_start_time;
+
+    while (recvs_outstanding > 0) {
+        MPI_Waitsome(numsend, req, &completed, indices, stat);
+
+		//if (myid == 0) printf("%d\n", completed);
+		mult_start_time = MPI_Wtime();
+
+        for (i = 0; i < completed; i++) {
+            idx = stat[i].MPI_SOURCE;
+            recv_idx = -1;
+
+			if (idx > myid) {
+				recv_idx = idx - 1;
+			} else {
+				recv_idx = idx;
+			}
+
+            if (recv_idx != -1) {
+                start_idx = matrix_info->displs[recv_procs[recv_idx]];
+				end_idx = start_idx + matrix_info->recvcounts[recv_procs[recv_idx]];
+				mult_block(matrix_loc_offd, x_recv[recv_idx], y_loc, start_idx, end_idx);
+                recvs_outstanding--;
+            }
+        }
+
+        mult_end_time = MPI_Wtime();
+        mult_time += mult_end_time - mult_start_time;
+    }
+
+    end_time = MPI_Wtime();
+    total_time = end_time - start_time;
+
+    if (myid == 0) {
+		printf("SpMV(s&r) time: %e [sec.], comm: %e [sec.], mult: %e [sec.]\n", 
+				total_time, total_time - mult_time, mult_time);
+	}
+
+}
+
+void mult(CSR_Matrix *A_loc, double *x, double *y_loc) {
+	unsigned int    i, j, end;
+	double          tempy;
+	double          *val = A_loc->val;
+	unsigned int    *col = A_loc->col;
+	unsigned int    *ptr = A_loc->ptr;
+	end = 0;
+	
+	for(i = 0; i < A_loc->rows; i++) {
+		tempy = 0.0;
+		j = end;
+		end = ptr[i+1];
+
+		for( ; j < end; j++) {
+			tempy += val[j] * x[col[j]];
+		}
+		y_loc[i] += tempy;
+	}
+}
+
+void mult_block(CSR_Matrix* A_loc, double* x_part, double* y_loc, int start_index, int end_index) {
+    int row, idx, global_idx, local_idx;
+	for (row = 0; row < A_loc->rows; row++) {
+        for (idx = A_loc->ptr[row]; idx < A_loc->ptr[row + 1]; idx++) {
+            global_idx = A_loc->col[idx];
+            if (global_idx >= start_index && global_idx < end_index) {
+                local_idx = global_idx - start_index;
+                y_loc[row] += A_loc->val[idx] * x_part[local_idx];
+            }
+        }
+    }
 }
