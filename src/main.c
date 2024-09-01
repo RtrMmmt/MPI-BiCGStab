@@ -14,6 +14,8 @@ int main(int argc, char *argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &myid);
     MPI_Get_processor_name(proc_name, &namelen);
 
+    double start_time, end_time, total_time;
+
     if (argc < 3) {
         if (myid == 0) {
             printf("Usage: %s <matrix file> <method> [options]\n", argv[0]);
@@ -40,7 +42,10 @@ int main(int argc, char *argv[]) {
 	csr_init_matrix(A_loc_diag);
     csr_init_matrix(A_loc_offd);
 
+    start_time = MPI_Wtime();
     MPI_csr_load_matrix_block(filename, A_loc_diag, A_loc_offd, &A_info);
+    end_time = MPI_Wtime();
+    if (myid == 0) printf("IO time      : %e [sec.]\n", end_time - start_time);
 
     if (A_info.cols != A_info.rows) {
         printf("Error: matrix is not square.\n");

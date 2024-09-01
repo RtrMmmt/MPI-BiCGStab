@@ -1,7 +1,7 @@
 #include "solver.h"
 
 #define  EPS        1.0e-9
-#define  MAX_ITER   4000
+#define  MAX_ITER   10000
 #define  OUT_ITER   100
 #define  MEASURE_TIME
 //#define  DISPLAY_RESIDUAL
