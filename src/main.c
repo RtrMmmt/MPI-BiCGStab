@@ -1,6 +1,9 @@
-// mpicc -O3 src/main.c src/solver.c src/matrix.c src/vector.c src/mmio.c -I src -lm
-// mpirun -np 4 ./a.out data/atmosmodd.mtx bicgstab
-// mpirun -np 4 ./a.out data/atmosmodd.mtx pipe_bicgstab_rr 30 6
+/******************************************************************************
+ * macでのコンパイルと実行コマンド
+ * mpicc -O3 src/main.c src/solver.c src/matrix.c src/vector.c src/mmio.c -I src -lm
+ * mpirun -np 4 ./a.out data/atmosmodd.mtx bicgstab
+ * mpirun -np 4 ./a.out data/atmosmodd.mtx pipe_bicgstab_rr 30 6
+ ******************************************************************************/
 
 #include "solver.h"
 
@@ -93,7 +96,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (myid == 0) printf("x[0] = %f, Total iter: %d\n", x_loc[0], total_iter);
+    //if (myid == 0) printf("x[0] = %f, Total iter: %d\n", x_loc[0], total_iter);
 
 	csr_free_matrix(A_loc_diag); free(A_loc_diag);
     csr_free_matrix(A_loc_offd); free(A_loc_offd);
