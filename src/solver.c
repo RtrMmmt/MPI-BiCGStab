@@ -1,11 +1,25 @@
 #include "solver.h"
 
-#define  EPS        1.0e-9
-#define  MAX_ITER   10000
-#define  OUT_ITER   100
-#define  MEASURE_TIME
-//#define  DISPLAY_RESIDUAL
+#define  EPS        1.0e-9  /* 収束判定条件 */
+#define  MAX_ITER   10000   /* 最大反復回数 */
 
+#define  MEASURE_TIME       /* 時間計測 */
+
+#define  DISPLAY_RESIDUAL   /* 残差表示 */
+#define  OUT_ITER   100     /* 残差表示の反復間隔 */
+
+/******************************************************************************
+ * @fn      bicgstab
+ * @brief   BiCGSTAB法
+ * @param   A_loc_diag : 行列Aの対角ブロック
+ * @param   A_loc_offd : 行列Aの非対角ブロック
+ * @param   A_info     : 行列Aの情報
+ * @param   x_loc      : 解ベクトル
+ * @param   r_loc      : 右辺ベクトルおよび残差ベクトル
+ * @return  実行した反復回数
+ * @sa
+ * @detail  行列、ベクトルを行方向に分割して受け取り、BiCGSTAB法を実行
+ ******************************************************************************/
 int bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_info, double *x_loc, double *r_loc) {
 
     int myid; MPI_Comm_rank(MPI_COMM_WORLD, &myid);
@@ -44,51 +58,53 @@ int bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_info
         start_time = MPI_Wtime();
 #endif
 
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, x_loc, vec, Ax_loc);
-    my_daxpy(vec_loc_size, -1.0, Ax_loc, r_loc);
-    my_dcopy(vec_loc_size, r_loc, r_hat_loc);
-    my_dcopy(vec_loc_size, r_loc, p_loc);
-    rTr = my_ddot(vec_loc_size, r_loc, r_loc);
+    /* 初期化 */
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, x_loc, vec, Ax_loc); /* Ax <- A x */
+    my_daxpy(vec_loc_size, -1.0, Ax_loc, r_loc);    /* r <- b - Ax */
+    my_dcopy(vec_loc_size, r_loc, r_hat_loc);       /* r# <- r */
+    my_dcopy(vec_loc_size, r_loc, p_loc);           /* p <- r */
+    rTr = my_ddot(vec_loc_size, r_loc, r_loc);      /* (r#,r) */
     MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);
     MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
 
     dot_r = rTr;
     dot_zero = rTr;
 
+    /* 反復 */
     while (dot_r > tol * tol * dot_zero && k < max_iter) {
 
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, p_loc, vec, s_loc);
-        rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc);
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, p_loc, vec, s_loc);  /* s <- A p */
+        rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc);  /* rTs <- (r#,s) */
         MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);
         MPI_Wait(&rTs_req, MPI_STATUS_IGNORE);
 
-        alpha = rTr / rTs;
-        my_daxpy(vec_loc_size, -alpha, s_loc, r_loc);
+        alpha = rTr / rTs;  /* alpha <- (r#,r)/(r#,s) */
+        my_daxpy(vec_loc_size, -alpha, s_loc, r_loc);   /* q <- r - alpha s */
 
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, y_loc);
-        rTy = my_ddot(vec_loc_size, r_loc, y_loc);
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, y_loc);  /* y <- A q */
+        rTy = my_ddot(vec_loc_size, r_loc, y_loc);  /* (q,y) */
         MPI_Iallreduce(MPI_IN_PLACE, &rTy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTy_req);
-        yTy = my_ddot(vec_loc_size, y_loc, y_loc);
+        yTy = my_ddot(vec_loc_size, y_loc, y_loc);  /* (y,y) */
         MPI_Iallreduce(MPI_IN_PLACE, &yTy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &yTy_req);
         MPI_Wait(&rTy_req, MPI_STATUS_IGNORE);
         MPI_Wait(&yTy_req, MPI_STATUS_IGNORE);
 
-        omega = rTy / yTy;
-        my_daxpy(vec_loc_size, alpha, p_loc, x_loc);
-        my_daxpy(vec_loc_size, omega, r_loc, x_loc);
-        my_daxpy(vec_loc_size, -omega, y_loc, r_loc);
-        dot_r = my_ddot(vec_loc_size, r_loc, r_loc);
+        omega = rTy / yTy;  /* omega <- (q,y)/(y,y) */
+        my_daxpy(vec_loc_size, alpha, p_loc, x_loc);    /* x <- x + alpha p + omega q */
+        my_daxpy(vec_loc_size, omega, r_loc, x_loc);    /*                            */
+        my_daxpy(vec_loc_size, -omega, y_loc, r_loc);   /* -------------------------- */
+        dot_r = my_ddot(vec_loc_size, r_loc, r_loc);    /* (r,r) */
         MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);
         rTr_old = rTr;
-        rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc);
+        rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc);  /* (r#,r) */
         MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);
         MPI_Wait(&dot_r_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
 
-        beta = (alpha / omega) * (rTr / rTr_old);
-        my_dscal(vec_loc_size, beta, p_loc);
-        my_daxpy(vec_loc_size, 1.0, r_loc, p_loc);
-        my_daxpy(vec_loc_size, -beta*omega, s_loc, p_loc);
+        beta = (alpha / omega) * (rTr / rTr_old);   /* beta <- (alpha / omega) * ((r#,r)/(r#,r)) */
+        my_dscal(vec_loc_size, beta, p_loc);                /* p <- r + beta p - beta omega s */
+        my_daxpy(vec_loc_size, 1.0, r_loc, p_loc);          /*                                */
+        my_daxpy(vec_loc_size, -beta*omega, s_loc, p_loc);  /* ------------------------------ */
         k++;
 
 #ifdef DISPLAY_RESIDUAL
@@ -117,6 +133,18 @@ int bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_info
     return k;
 }
 
+/******************************************************************************
+ * @fn      ca_bicgstab
+ * @brief   Communication avoiding BiCGSTAB法
+ * @param   A_loc_diag : 行列Aの対角ブロック
+ * @param   A_loc_offd : 行列Aの非対角ブロック
+ * @param   A_info     : 行列Aの情報
+ * @param   x_loc      : 解ベクトル
+ * @param   r_loc      : 右辺ベクトルおよび残差ベクトル
+ * @return  実行した反復回数
+ * @sa
+ * @detail  行列、ベクトルを行方向に分割して受け取り、CA-BiCGSTAB法を実行
+ ******************************************************************************/
 int ca_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_info, double *x_loc, double *r_loc) {
 
     int myid; MPI_Comm_rank(MPI_COMM_WORLD, &myid);
@@ -156,56 +184,57 @@ int ca_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_i
         start_time = MPI_Wtime();
 #endif
 
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, x_loc, vec, Ax_loc);
-    my_daxpy(vec_loc_size, -1.0, Ax_loc, r_loc);
-    my_dcopy(vec_loc_size, r_loc, r_hat_loc);
-    rTr = my_ddot(vec_loc_size, r_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);
+    /* 初期化 */
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, x_loc, vec, Ax_loc); /* Ax <- A x */
+    my_daxpy(vec_loc_size, -1.0, Ax_loc, r_loc);    /* r <- b - Ax */
+    my_dcopy(vec_loc_size, r_loc, r_hat_loc);       /* r# <- r */
+    rTr = my_ddot(vec_loc_size, r_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);   /* (r,r) */
 
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, w_loc);
-    rTw = my_ddot(vec_loc_size, r_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, w_loc);  /* w <- A r */
+    rTw = my_ddot(vec_loc_size, r_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);   /* (r,w) */
     MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
     MPI_Wait(&rTw_req, MPI_STATUS_IGNORE);
 
-    alpha = rTr / rTw;
-    beta = 0;
+    alpha = rTr / rTw;  /* alpha <- (r,r)/(r,w) */
+    beta = 0;           /* beta  <- 0 */
     dot_r = rTr;
     dot_zero = rTr;
 
+    /* 反復 */
     while (dot_r > tol * tol * dot_zero && k < max_iter) {
-        my_daxpy(vec_loc_size, -omega, s_loc, p_loc);
-        my_dscal(vec_loc_size, beta, p_loc);
-        my_daxpy(vec_loc_size, 1.0, r_loc, p_loc);
-        my_daxpy(vec_loc_size, -omega, z_loc, s_loc);
-        my_dscal(vec_loc_size, beta, s_loc);
-        my_daxpy(vec_loc_size, 1.0, w_loc, s_loc);
-        my_daxpy(vec_loc_size, -alpha, s_loc, r_loc);
+        my_daxpy(vec_loc_size, -omega, s_loc, p_loc);   /* p <- r + beta (p - omega s) */
+        my_dscal(vec_loc_size, beta, p_loc);            /*                             */
+        my_daxpy(vec_loc_size, 1.0, r_loc, p_loc);      /* --------------------------- */
+        my_daxpy(vec_loc_size, -omega, z_loc, s_loc);   /* s <- w + beta (s - omega z) */
+        my_dscal(vec_loc_size, beta, s_loc);            /*                             */
+        my_daxpy(vec_loc_size, 1.0, w_loc, s_loc);      /* --------------------------- */
 
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, s_loc, vec, z_loc);
-        my_daxpy(vec_loc_size, -alpha, z_loc, w_loc);
-        rTw = my_ddot(vec_loc_size, r_loc, w_loc);      MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);
-        wTw = my_ddot(vec_loc_size, w_loc, w_loc);      MPI_Iallreduce(MPI_IN_PLACE, &wTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &wTw_req);
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, s_loc, vec, z_loc);  /* z <- A s */
+        my_daxpy(vec_loc_size, -alpha, s_loc, r_loc);   /* q <- r - alpha s */
+        my_daxpy(vec_loc_size, -alpha, z_loc, w_loc);   /* y <- w - alpha z */
+        rTw = my_ddot(vec_loc_size, r_loc, w_loc);      MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);   /* (q,y) */
+        wTw = my_ddot(vec_loc_size, w_loc, w_loc);      MPI_Iallreduce(MPI_IN_PLACE, &wTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &wTw_req);   /* (y,y) */
         MPI_Wait(&rTw_req, MPI_STATUS_IGNORE);
         MPI_Wait(&wTw_req, MPI_STATUS_IGNORE);
 
-        omega = rTw / wTw;
-        my_daxpy(vec_loc_size, alpha, p_loc, x_loc);
-        my_daxpy(vec_loc_size, omega, r_loc, x_loc);
-        my_daxpy(vec_loc_size, -omega, w_loc, r_loc);
-        dot_r = my_ddot(vec_loc_size, r_loc, r_loc);
-        MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);
+        omega = rTw / wTw;  /* omega <- (q,y)/(y,y) */
+        my_daxpy(vec_loc_size, alpha, p_loc, x_loc);    /* x <- x + alpha p + omega q */
+        my_daxpy(vec_loc_size, omega, r_loc, x_loc);    /* -------------------------- */
+        my_daxpy(vec_loc_size, -omega, w_loc, r_loc);   /* r <- q - omega y */
+        dot_r = my_ddot(vec_loc_size, r_loc, r_loc);    MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);   /* (r,r) */
 
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, w_loc);
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, w_loc);  /* w <- A r */
         rTr_old = rTr;
-        rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);
-        rTw = my_ddot(vec_loc_size, r_hat_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);
-        rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);
-        rTz = my_ddot(vec_loc_size, r_hat_loc, z_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTz, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTz_req);
+        rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);   /* (r#,r) */
+        rTw = my_ddot(vec_loc_size, r_hat_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);   /* (r#,w) */
+        rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);   /* (r#,s) */
+        rTz = my_ddot(vec_loc_size, r_hat_loc, z_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTz, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTz_req);   /* (r#,z) */
         MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTw_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTs_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTz_req, MPI_STATUS_IGNORE);
-        beta = (alpha / omega) * (rTr / rTr_old);
-        alpha = rTr / (rTw + beta * (rTs - omega * rTz));
+        beta = (alpha / omega) * (rTr / rTr_old);   /* beta <- (alpha / omega) * ((r#,r)/(r#,r)) */
+        alpha = rTr / (rTw + beta * (rTs - omega * rTz));   /* beta <- (r#,r) / {(r#,r) + beta ((r#,s) - omega (r#,z))} */
 
         k++;
 
@@ -236,6 +265,18 @@ int ca_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_i
     return k;
 }
 
+/******************************************************************************
+ * @fn      pipe_bicgstab
+ * @brief   Pipelined BiCGSTAB法
+ * @param   A_loc_diag : 行列Aの対角ブロック
+ * @param   A_loc_offd : 行列Aの非対角ブロック
+ * @param   A_info     : 行列Aの情報
+ * @param   x_loc      : 解ベクトル
+ * @param   r_loc      : 右辺ベクトルおよび残差ベクトル
+ * @return  実行した反復回数
+ * @sa
+ * @detail  行列、ベクトルを行方向に分割して受け取り、Pipelined BiCGSTAB法を実行
+ ******************************************************************************/
 int pipe_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_info, double *x_loc, double *r_loc) {
     int myid; MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
@@ -276,61 +317,63 @@ int pipe_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A
         start_time = MPI_Wtime();
 #endif
 
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, x_loc, vec, Ax_loc);
-    my_daxpy(vec_loc_size, -1.0, Ax_loc, r_loc);
-    my_dcopy(vec_loc_size, r_loc, r_hat_loc);
-    rTr = my_ddot(vec_loc_size, r_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);
+    /* 初期化 */
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, x_loc, vec, Ax_loc); /* Ax <- A x */
+    my_daxpy(vec_loc_size, -1.0, Ax_loc, r_loc);    /* r <- b - Ax */
+    my_dcopy(vec_loc_size, r_loc, r_hat_loc);       /* r# <- r */
+    rTr = my_ddot(vec_loc_size, r_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);   /* (r,r) */
 
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, w_loc);
-    rTw = my_ddot(vec_loc_size, r_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, w_loc);  /* w <- A r */
+    rTw = my_ddot(vec_loc_size, r_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);   /* (r,w) */
 
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, w_loc, vec, t_loc);
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, w_loc, vec, t_loc);  /* t <- A w */
     MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
     MPI_Wait(&rTw_req, MPI_STATUS_IGNORE);
 
-    alpha = rTr / rTw;
-    beta = 0;
+    alpha = rTr / rTw;  /* alpha <- (r,r)/(r,w) */
+    beta = 0;           /* beta  <- 0 */
     dot_r = rTr;
     dot_zero = rTr;
 
+    /* 反復 */
     while (dot_r > tol * tol * dot_zero && k < max_iter) {
-        my_daxpy(vec_loc_size, -omega, s_loc, p_loc);
-        my_dscal(vec_loc_size, beta, p_loc);
-        my_daxpy(vec_loc_size, 1.0, r_loc, p_loc);
-        my_daxpy(vec_loc_size, -omega, z_loc, s_loc);
-        my_dscal(vec_loc_size, beta, s_loc);
-        my_daxpy(vec_loc_size, 1.0, w_loc, s_loc);
-        my_daxpy(vec_loc_size, -omega, v_loc, z_loc);
-        my_dscal(vec_loc_size, beta, z_loc);
-        my_daxpy(vec_loc_size, 1.0, t_loc, z_loc);
-        my_daxpy(vec_loc_size, -alpha, s_loc, r_loc);
-        my_daxpy(vec_loc_size, -alpha, z_loc, w_loc);
-        rTw = my_ddot(vec_loc_size, r_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);
-        wTw = my_ddot(vec_loc_size, w_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &wTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &wTw_req);
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, z_loc, vec, v_loc);
+        my_daxpy(vec_loc_size, -omega, s_loc, p_loc);   /* p <- r + beta (p - omega s) */
+        my_dscal(vec_loc_size, beta, p_loc);            /*                             */
+        my_daxpy(vec_loc_size, 1.0, r_loc, p_loc);      /* --------------------------- */
+        my_daxpy(vec_loc_size, -omega, z_loc, s_loc);   /* s <- w + beta (s - omega z) */
+        my_dscal(vec_loc_size, beta, s_loc);            /*                             */
+        my_daxpy(vec_loc_size, 1.0, w_loc, s_loc);      /* --------------------------- */
+        my_daxpy(vec_loc_size, -omega, v_loc, z_loc);   /* z <- t + beta (z - omega v) */
+        my_dscal(vec_loc_size, beta, z_loc);            /*                             */
+        my_daxpy(vec_loc_size, 1.0, t_loc, z_loc);      /* --------------------------- */
+        my_daxpy(vec_loc_size, -alpha, s_loc, r_loc);   /* q <- r - alpha s */
+        my_daxpy(vec_loc_size, -alpha, z_loc, w_loc);   /* y <- w - alpha z */
+        rTw = my_ddot(vec_loc_size, r_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);   /* (q,y) */
+        wTw = my_ddot(vec_loc_size, w_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &wTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &wTw_req);   /* (y,y) */
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, z_loc, vec, v_loc);  /* v <- A z ドット積の通信をオーバーラップ */
         MPI_Wait(&rTw_req, MPI_STATUS_IGNORE);
         MPI_Wait(&wTw_req, MPI_STATUS_IGNORE);
 
-        omega = rTw / wTw;
-        my_daxpy(vec_loc_size, alpha, p_loc, x_loc);
-        my_daxpy(vec_loc_size, omega, r_loc, x_loc);
-        my_daxpy(vec_loc_size, -omega, w_loc, r_loc);
-        dot_r = my_ddot(vec_loc_size, r_loc, r_loc);    MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);
-        my_daxpy(vec_loc_size, -alpha, v_loc, t_loc);
-        my_daxpy(vec_loc_size, -omega, t_loc, w_loc);
+        omega = rTw / wTw;  /* omega <- (q,y)/(y,y) */
+        my_daxpy(vec_loc_size, alpha, p_loc, x_loc);    /* x <- x + alpha p + omega q */
+        my_daxpy(vec_loc_size, omega, r_loc, x_loc);    /* -------------------------- */
+        my_daxpy(vec_loc_size, -omega, w_loc, r_loc);   /* r <- q - omega y */
+        dot_r = my_ddot(vec_loc_size, r_loc, r_loc);    MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);   /* (r,r) */
+        my_daxpy(vec_loc_size, -alpha, v_loc, t_loc);   /* w <- y - omega (t - alpha v) */
+        my_daxpy(vec_loc_size, -omega, t_loc, w_loc);   /* ---------------------------- */
         rTr_old = rTr;
-        rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);
-        rTw = my_ddot(vec_loc_size, r_hat_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);
-        rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);
-        rTz = my_ddot(vec_loc_size, r_hat_loc, z_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTz, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTz_req);
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, w_loc, vec, t_loc);
+        rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);   /* (r#,r) */
+        rTw = my_ddot(vec_loc_size, r_hat_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);   /* (r#,w) */
+        rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);   /* (r#,s) */
+        rTz = my_ddot(vec_loc_size, r_hat_loc, z_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTz, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTz_req);   /* (r#,z) */
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, w_loc, vec, t_loc);  /* t <- A w ドット積の通信をオーバーラップ */
         MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTw_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTs_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTz_req, MPI_STATUS_IGNORE);
 
-        beta = (alpha / omega) * (rTr / rTr_old);
-        alpha = rTr / (rTw + beta * (rTs - omega * rTz));
+        beta = (alpha / omega) * (rTr / rTr_old);           /* beta <- (alpha / omega) * ((r#,r)/(r#,r)) */
+        alpha = rTr / (rTw + beta * (rTs - omega * rTz));   /* alpha <- (r#,r) / {(r#,w) + beta ((r#,s) - omega (r#,z))} */
 
         k++;
 
@@ -361,6 +404,20 @@ int pipe_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A
     return k;
 }
 
+/******************************************************************************
+ * @fn      pipe_bicgstab_rr
+ * @brief   Pipelined BiCGSTAB法 with Residual replacement
+ * @param   A_loc_diag : 行列Aの対角ブロック
+ * @param   A_loc_offd : 行列Aの非対角ブロック
+ * @param   A_info     : 行列Aの情報
+ * @param   x_loc      : 解ベクトル
+ * @param   r_loc      : 右辺ベクトルおよび残差ベクトル
+ * @param   krr        : 残差置換の周期
+ * @param   nrr        : 残差置換を行う最大回数
+ * @return  実行した反復回数
+ * @sa
+ * @detail  行列、ベクトルを行方向に分割して受け取り、残差置換付きPipelined BiCGSTAB法を実行
+ ******************************************************************************/
 int pipe_bicgstab_rr(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_info, double *x_loc, double *r_loc, int krr, int nrr) {
     int myid; MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
@@ -402,78 +459,79 @@ int pipe_bicgstab_rr(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix
         start_time = MPI_Wtime();
 #endif
 
-    my_dcopy(vec_loc_size, r_loc, b_loc);
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, x_loc, vec, Ax_loc);
-    my_daxpy(vec_loc_size, -1.0, Ax_loc, r_loc);
-    my_dcopy(vec_loc_size, r_loc, r_hat_loc);
-    rTr = my_ddot(vec_loc_size, r_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);
+    /* 初期化 */
+    my_dcopy(vec_loc_size, r_loc, b_loc);  /* b <- r */
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, x_loc, vec, Ax_loc); /* Ax <- A x */
+    my_daxpy(vec_loc_size, -1.0, Ax_loc, r_loc);    /* r <- b - Ax */
+    my_dcopy(vec_loc_size, r_loc, r_hat_loc);       /* r# <- r */
+    rTr = my_ddot(vec_loc_size, r_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);   /* (r,r) */
 
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, w_loc);
-    rTw = my_ddot(vec_loc_size, r_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, w_loc);  /* w <- A r */
+    rTw = my_ddot(vec_loc_size, r_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);   /* (r,w) */
 
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, w_loc, vec, t_loc);
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, w_loc, vec, t_loc);  /* t <- A w */
     MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
     MPI_Wait(&rTw_req, MPI_STATUS_IGNORE);
 
-    alpha = rTr / rTw;
-    beta = 0;
+    alpha = rTr / rTw;  /* alpha <- (r,r)/(r,w) */
+    beta = 0;           /* beta  <- 0 */
     dot_r = rTr;
     dot_zero = rTr;
 
     while (dot_r > tol * tol * dot_zero && k < max_iter) {
-        my_daxpy(vec_loc_size, -omega, s_loc, p_loc);
-        my_dscal(vec_loc_size, beta, p_loc);
-        my_daxpy(vec_loc_size, 1.0, r_loc, p_loc);
+        my_daxpy(vec_loc_size, -omega, s_loc, p_loc);   /* p <- r + beta (p - omega s) */
+        my_dscal(vec_loc_size, beta, p_loc);            /*                             */
+        my_daxpy(vec_loc_size, 1.0, r_loc, p_loc);      /* --------------------------- */
 
-        if (k % krr == 0 && k > 0 && k <= krr * nrr) {
-            MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, p_loc, vec, s_loc);
-            MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, s_loc, vec, z_loc);
+        if (k % krr == 0 && k > 0 && k <= krr * nrr) {  /* 残差置換 */
+            MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, p_loc, vec, s_loc);  /* s <- A p */
+            MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, s_loc, vec, z_loc);  /* z <- A s */
         } else {
-            my_daxpy(vec_loc_size, -omega, z_loc, s_loc);
-            my_dscal(vec_loc_size, beta, s_loc);
-            my_daxpy(vec_loc_size, 1.0, w_loc, s_loc);
-            my_daxpy(vec_loc_size, -omega, v_loc, z_loc);
-            my_dscal(vec_loc_size, beta, z_loc);
-            my_daxpy(vec_loc_size, 1.0, t_loc, z_loc);
+            my_daxpy(vec_loc_size, -omega, z_loc, s_loc);   /* s <- w + beta (s - omega z) */
+            my_dscal(vec_loc_size, beta, s_loc);            /*                             */
+            my_daxpy(vec_loc_size, 1.0, w_loc, s_loc);      /* --------------------------- */
+            my_daxpy(vec_loc_size, -omega, v_loc, z_loc);   /* z <- t + beta (z - omega v) */
+            my_dscal(vec_loc_size, beta, z_loc);            /*                             */
+            my_daxpy(vec_loc_size, 1.0, t_loc, z_loc);      /* --------------------------- */
         }
 
-        my_daxpy(vec_loc_size, -alpha, s_loc, r_loc);
-        my_daxpy(vec_loc_size, -alpha, z_loc, w_loc);
-        rTw = my_ddot(vec_loc_size, r_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);
-        wTw = my_ddot(vec_loc_size, w_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &wTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &wTw_req);
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, z_loc, vec, v_loc);
+        my_daxpy(vec_loc_size, -alpha, s_loc, r_loc);       /* q <- r - alpha s */
+        my_daxpy(vec_loc_size, -alpha, z_loc, w_loc);       /* y <- w - alpha z */
+        rTw = my_ddot(vec_loc_size, r_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);   /* (q,y) */
+        wTw = my_ddot(vec_loc_size, w_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &wTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &wTw_req);   /* (y,y) */
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, z_loc, vec, v_loc);  /* v <- A z ドット積の通信をオーバーラップ */
         MPI_Wait(&rTw_req, MPI_STATUS_IGNORE);
         MPI_Wait(&wTw_req, MPI_STATUS_IGNORE);
 
-        omega = rTw / wTw;
-        my_daxpy(vec_loc_size, alpha, p_loc, x_loc);
-        my_daxpy(vec_loc_size, omega, r_loc, x_loc);
+        omega = rTw / wTw;  /* omega <- (q,y)/(y,y) */
+        my_daxpy(vec_loc_size, alpha, p_loc, x_loc);    /* x <- x + alpha p + omega q */
+        my_daxpy(vec_loc_size, omega, r_loc, x_loc);    /* -------------------------- */
 
-        if (k % krr == 0 && k > 0 && k <= krr * nrr) {
-            MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, x_loc, vec, Ax_loc);
-            my_dcopy(vec_loc_size, b_loc, r_loc);
-            my_daxpy(vec_loc_size, -1.0, Ax_loc, r_loc);
-            MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, w_loc);
+        if (k % krr == 0 && k > 0 && k <= krr * nrr) {  /* 残差置換 */
+            MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, x_loc, vec, Ax_loc); /* Ax <- A x */
+            my_dcopy(vec_loc_size, b_loc, r_loc);   /* r <- b */
+            my_daxpy(vec_loc_size, -1.0, Ax_loc, r_loc);    /* r <- b - Ax */
+            MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, w_loc);  /* w <- A r */
         } else {
-            my_daxpy(vec_loc_size, -omega, w_loc, r_loc);
-            my_daxpy(vec_loc_size, -alpha, v_loc, t_loc);
-            my_daxpy(vec_loc_size, -omega, t_loc, w_loc);
+            my_daxpy(vec_loc_size, -omega, w_loc, r_loc);   /* r <- q - omega y */
+            my_daxpy(vec_loc_size, -alpha, v_loc, t_loc);   /* w <- y - omega (t - alpha v) */
+            my_daxpy(vec_loc_size, -omega, t_loc, w_loc);   /* ---------------------------- */
         }
 
-        dot_r = my_ddot(vec_loc_size, r_loc, r_loc);    MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);
+        dot_r = my_ddot(vec_loc_size, r_loc, r_loc);    MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);   /* (r,r) */
         rTr_old = rTr;
-        rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);
-        rTw = my_ddot(vec_loc_size, r_hat_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);
-        rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);
-        rTz = my_ddot(vec_loc_size, r_hat_loc, z_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTz, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTz_req);
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, w_loc, vec, t_loc);
+        rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);   /* (r#,r) */
+        rTw = my_ddot(vec_loc_size, r_hat_loc, w_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTw, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTw_req);   /* (r#,w) */
+        rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);   /* (r#,s) */
+        rTz = my_ddot(vec_loc_size, r_hat_loc, z_loc);  MPI_Iallreduce(MPI_IN_PLACE, &rTz, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTz_req);   /* (r#,z) */
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, w_loc, vec, t_loc);  /* t <- A w ドット積の通信をオーバーラップ */
         MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTw_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTs_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTz_req, MPI_STATUS_IGNORE);
 
-        beta = (alpha / omega) * (rTr / rTr_old);
-        alpha = rTr / (rTw + beta * (rTs - omega * rTz));
+        beta = (alpha / omega) * (rTr / rTr_old);           /* beta <- (alpha / omega) * ((r#,r)/(r#,r)) */
+        alpha = rTr / (rTw + beta * (rTs - omega * rTz));   /* alpha <- (r#,r) / {(r#,w) + beta ((r#,s) - omega (r#,z))} */
 
         k++;
 
