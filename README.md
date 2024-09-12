@@ -17,7 +17,7 @@ C言語で実装し、行列はmatrix market形式のファイルをCSR形式で
 | mmio.c/mmio.h       | matrix market形式のデータを読み取る<br>[Matrix Marketのページ](https://math.nist.gov/MatrixMarket/mmio-c.html)からダウンロードできる |   |
 | vector.c/vector.h   | ベクトル演算                                                          |  |
 | matrix.c/matrix.h   | 行列の構造体の定義、行列データのメモリへの格納、行列ベクトル積、その他行列操作  | mmio.h |
-| solver.c/solver.h   | BiCGStabの関数<br> - BiCGStab <br> - Communication Avoiding BiCGStab <br> - Pipelined BiCGStab <br> - Pipelined BiCGStab with residual replacement  | vector.h/matrix.h |
+| solver.c/solver.h   | BiCGStabの関数<br> - BiCGStab <br> - Communication Avoiding BiCGStab <br> - Pipelined BiCGStab <br> - Pipelined BiCGStab with residual replacement  | vector.h, matrix.h |
 | main.c              | 実行と時間計測                                     | solver.h |
 
 
