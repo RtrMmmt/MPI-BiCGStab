@@ -20,6 +20,7 @@ int main(int argc, char *argv[]) {
     MPI_Get_processor_name(proc_name, &namelen);
 
 #ifdef DISPLAY_NODE_INFO
+    /* ノード数とプロセス数をカウント */
     char *all_proc_names = NULL;
     if (myid == 0) {
         all_proc_names = (char *)malloc(numprocs * MPI_MAX_PROCESSOR_NAME * sizeof(char));
@@ -76,16 +77,16 @@ int main(int argc, char *argv[]) {
     char *filename = argv[1];
     char *method = argv[2];
 
+    /* 行列の初期化 */
     INFO_Matrix A_info;
-
     A_info.recvcounts = (int *)malloc(numprocs * sizeof(int));
     A_info.displs = (int *)malloc(numprocs * sizeof(int));
-
 	CSR_Matrix *A_loc_diag = (CSR_Matrix *)malloc(sizeof(CSR_Matrix));
     CSR_Matrix *A_loc_offd = (CSR_Matrix *)malloc(sizeof(CSR_Matrix));
 	csr_init_matrix(A_loc_diag);
     csr_init_matrix(A_loc_offd);
 
+    /* 行列の読み取り */
     start_time = MPI_Wtime();
     MPI_csr_load_matrix_block(filename, A_loc_diag, A_loc_offd, &A_info);
     end_time = MPI_Wtime();
@@ -96,6 +97,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
+    /* ベクトルの初期化 */
     double *x_loc, *r_loc, *x, *r;
     int vec_size = A_info.rows;
     int vec_loc_size = A_loc_diag->rows;
@@ -105,17 +107,18 @@ int main(int argc, char *argv[]) {
     r = (double *)malloc(vec_size * sizeof(double));
 
     for (int i = 0; i < vec_loc_size; i++) {
-        x_loc[i] = 1; // 厳密解はすべて1
+        x_loc[i] = 1; /* 厳密解はすべて1 */
     }
 
     MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, &A_info, x_loc, x, r_loc);
 
     for (int i = 0; i < vec_loc_size; i++) {
-        x_loc[i] = 0; // 初期値はすべて0
+        x_loc[i] = 0; /* 初期値はすべて0 */
     }
 
     int total_iter;
 
+    /* 実行 */
     if (strcmp(method, "bicgstab") == 0) {
         total_iter = bicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc, r_loc);
     } else if (strcmp(method, "ca_bicgstab") == 0) {

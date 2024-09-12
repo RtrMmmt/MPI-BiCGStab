@@ -8,28 +8,28 @@
 #include "mmio.h"
 
 typedef struct {
-	double          *val;  //非ゼロ要素の値を格納する配列
-	unsigned int    *row;  //行のインデックスを格納する配列
-	unsigned int    *col;  //列のインデックスを格納する配列
-	unsigned int    nz;    //非ゼロ要素の数
-	unsigned int    rows;  //行数
-	unsigned int    cols;  //列数
+	double          *val;  /* 非ゼロ要素の値を格納する配列 */
+	unsigned int    *row;  /* 行のインデックスを格納する配列 */
+	unsigned int    *col;  /* 列のインデックスを格納する配列 */
+	unsigned int    nz;    /* 非ゼロ要素の数 */
+	unsigned int    rows;  /* 行数 */
+	unsigned int    cols;  /* 列数 */
 } COO_Matrix;
 
 typedef struct {
-	double          *val; //非ゼロ要素の値を格納する配列
-	unsigned int    *col; //列のインデックスを格納する配列
-	unsigned int    *ptr; //各行の開始ポインタを格納する配列
-	unsigned int    nz;   //非ゼロ要素の数
-	unsigned int    rows; //行数
-	unsigned int    cols; //列数
+	double          *val; /* 非ゼロ要素の値を格納する配列 */
+	unsigned int    *col; /* 列のインデックスを格納する配列 */
+	unsigned int    *ptr; /* 各行の開始ポインタを格納する配列 */
+	unsigned int    nz;   /* 非ゼロ要素の数 */
+	unsigned int    rows; /* 行数 */
+	unsigned int    cols; /* 列数 */
 } CSR_Matrix;
 
 typedef struct {
 	unsigned int 	nz, rows, cols;
 	MM_typecode 	code;
-    int 			*recvcounts;  // 各プロセスの受信カウント
-    int 			*displs;      // 各プロセスのデータの開始位置
+    int 			*recvcounts;  /*  各プロセスの受信カウント */
+    int 			*displs;      /*  各プロセスのデータの開始位置 */
 } INFO_Matrix;
 
 void coo_init_matrix(COO_Matrix *m);
