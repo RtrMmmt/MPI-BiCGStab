@@ -8,6 +8,7 @@
 ## 概要
 
 クリロフ部分空間法の1つである、BiCGStabのMPI実装を行いました。<br>
+BiCGStabのアルゴリズムはCoolsらの論文[https://doi.org/10.1016/j.parco.2017.04.005]を参考にしました。<br>
 C言語で実装し、行列はmatrix market形式のファイルをCSR形式でメモリに格納しています。
 
 ## srcフォルダの中身
