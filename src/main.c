@@ -7,7 +7,7 @@
 
 #include "solver.h"
 
-#define DISPLAY_NODE_INFO
+#define DISPLAY_NODE_INFO   /* ノード数とプロセス数の表示 */
 
 int main(int argc, char *argv[]) {
     

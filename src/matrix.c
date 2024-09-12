@@ -1,6 +1,6 @@
 #include "matrix.h"
 
-//#define DYNAMIC_ROWS
+//#define DYNAMIC_ROWS	/* 行ごとの非ゼロ要素数によって分割行数を決定 */
 
 /******************************************************************************
  * @fn      coo_init_matrix, coo_free_matrix, coo_load_matrix
