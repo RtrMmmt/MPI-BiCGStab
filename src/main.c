@@ -10,7 +10,7 @@
 #define DISPLAY_NODE_INFO   /* ノード数とプロセス数の表示 */
 
 int main(int argc, char *argv[]) {
-    
+
     MPI_Init(&argc, &argv);
 
     int numprocs, myid, namelen;
