@@ -24,11 +24,11 @@ C言語で実装し、行列はmatrix market形式のファイルをCSR形式で
 
 ## 実験結果
 
-行列はTransport.mtx ([University of Florida](https://www.cise.ufl.edu/research/sparse/matrices/Janna/Transport.html))、右辺ベクトルは全ての要素が1のベクトル
-<br>相対残差の収束履歴の取得と実行時間を計測
+連立1次方程式における行列はTransport.mtx ([University of Florida](https://www.cise.ufl.edu/research/sparse/matrices/Janna/Transport.html))、右辺ベクトルは全ての要素が1のベクトルで実験を行いました。
+<br>相対残差の収束履歴の取得と実行時間を計測しました。
 
 | Matrix properties  |  |
-| --------------------- | ---------- |
+| ------------------------- | ------------- |
 | number of rows            | 1,602,111     |
 | number of columns         | 1,602,111     |
 | nonzeros                  | 23,487,281    |
@@ -52,7 +52,7 @@ C言語で実装し、行列はmatrix market形式のファイルをCSR形式で
 
 ## 最後に
 
-2プロセス/ノード、4プロセス/ノードである程度の台数効果を確認できた。<br>
-1ノードあたりのプロセス数を4プロセスより増やすと、あまり台数効果を得られなかった。行列ベクトル積で発生する通信がオーバーヘッドになっていると考えられる。
+2プロセス/ノード、4プロセス/ノードである程度の台数効果を確認できました。<br>
+1ノードあたりのプロセス数を4プロセスより増やすと、あまり台数効果を得られませんでした。行列ベクトル積で発生する通信がオーバーヘッドになっていると考えられます。
 
 <p align="right">(<a href="#top">トップへ</a>)</p>
