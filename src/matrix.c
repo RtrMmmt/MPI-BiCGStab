@@ -2,6 +2,10 @@
 
 //#define DYNAMIC_ROWS
 
+/******************************************************************************
+ * @fn      coo_init_matrix, coo_free_matrix, coo_load_matrix
+ * @brief   COO形式の行列の初期化、メモリ解放、matrix market形式のデータの読み込み
+ ******************************************************************************/
 void coo_init_matrix(COO_Matrix *m) {
 	m->val = NULL;
 	m->row = NULL;
@@ -89,6 +93,10 @@ int coo_load_matrix(char* filename, COO_Matrix *coo) {
 	return mm_is_symmetric(code);
 }
 
+/******************************************************************************
+ * @fn      coo_mv, coo_mv_sym, coo_copy
+ * @brief   COO形式のベクトル行列積（非対称、対称）、データのコピー
+ ******************************************************************************/
 void coo_mv(COO_Matrix *m, double *x, double *y) {
 	unsigned int    i;
 	double          *val = m->val;
@@ -144,6 +152,10 @@ void coo_copy(COO_Matrix *in, COO_Matrix *out) {
 	}
 }
 
+/******************************************************************************
+ * @fn      coo_reorder_by_rows, cooMerge, cooMergeSort
+ * @brief   matrix market形式のデータから読み込んだ際に「行」で並び替え
+ ******************************************************************************/
 void coo_reorder_by_rows(COO_Matrix *m) {
     unsigned int 	*B = (unsigned int *)malloc(m->nz * sizeof(unsigned int));
     unsigned int 	*B2 = (unsigned int *)malloc(m->nz * sizeof(unsigned int));
@@ -204,6 +216,10 @@ void cooMergeSort(unsigned int *A, unsigned int *A2, double *A3, unsigned int *B
     }
 }
 
+/******************************************************************************
+ * @fn      csr_init_matrix, csr_free_matrix, coo2csr, csr_load_matrix
+ * @brief   CSR形式の行列の初期化、メモリ解放、COO形式からCSR形式へ変更
+ ******************************************************************************/
 void csr_init_matrix(CSR_Matrix *m) {
 	m->val = NULL;
 	m->col = NULL;
@@ -259,6 +275,10 @@ int csr_load_matrix(char* filename, CSR_Matrix *m) {
 	return sym;
 }
 
+/******************************************************************************
+ * @fn      csr_mv, csr_mv_sym
+ * @brief   CSR形式のベクトル行列積（非対称、対称）
+ ******************************************************************************/
 void csr_mv(CSR_Matrix *m, double *x, double *y) {
 	unsigned int    i, j, end;
 	double          tempy;
@@ -306,6 +326,31 @@ void csr_mv_sym(CSR_Matrix *m, double *x, double *y) {
 	}
 }
 
+/******************************************************************************
+ * @fn      MPI_coo_load_matrix
+ * @brief   行列を行方向に分割してCOO形式で読み込む
+ * 
+ * 	|-------------------|
+ *  |		A_0			| <- proc 0
+ *  |-------------------|
+ *  |		A_1			| <- proc 1
+ *  |-------------------|
+ *  |		A_2			| <- proc 2
+ *  |-------------------|
+ *  |		A_3			| <- proc 3
+ *  |-------------------|
+ * 
+ * @param   filename   : matrix market形式のデータファイル
+ * @param   matrix_loc : 分割したローカルの行列(COO形式)
+ * @param   matrix_info: 行列のサイズや分割サイズの情報
+ * @sa
+ * @detail  "DYNAMIC_ROWS"をdefineすることで、行ごとに非ゼロ要素数をカウントし、プロセス
+ * 			ごとに要素数が均等になるようにローカルの行数を決める
+ * 			defineしない場合、ローカルの行数はグローバルの行数をプロセス数で割ったもの
+ * 			最初にローカルで保持するメモリのサイズを決めるため、1回データを全て読み取り非ゼ
+ * 			ロ要素数をカウント　その後、確保したメモリにデータを格納するためもう一度データを
+ * 			全て読み取る
+ ******************************************************************************/
 void MPI_coo_load_matrix(char *filename, COO_Matrix *matrix_loc, INFO_Matrix *matrix_info) {
 	int numprocs, myid;
     MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
@@ -316,8 +361,9 @@ void MPI_coo_load_matrix(char *filename, COO_Matrix *matrix_loc, INFO_Matrix *ma
 	FILE *file;
 	MM_typecode code;
 	
-	file = fopen(filename, "r");
+	file = fopen(filename, "r");	/* ファイルを開く */
 
+	/* バナーと行列の情報を読み取る */
     if (mm_read_banner(file, &code) != 0) {
         fprintf(stderr, "ERROR: Could not process Matrix Market banner.\n");
         exit(EXIT_FAILURE);
@@ -330,10 +376,11 @@ void MPI_coo_load_matrix(char *filename, COO_Matrix *matrix_loc, INFO_Matrix *ma
 	matrix_info->nz = nz; matrix_info->rows = m; matrix_info->cols = n;
 	strncpy(matrix_info->code, code, sizeof(MM_typecode));
 
-    int *nz_per_row = (int *)calloc(m, sizeof(int));
-    int row, col, ival;
-    double val;
+    int *nz_per_row = (int *)calloc(m, sizeof(int));	/* 1行ごとの非ゼロ要素数 */
+    int row, col, ival;		/* 行、列、複素数 */
+    double val;				/* 値 */
     
+	/* 全ての非ゼロ要素を読み取る ここでは、行ごとの非ゼロ要素数をカウントする */
     for (int i = 0; i < nz; i++) {
 		if (mm_is_pattern(code)) {
 			if (fscanf(file, "%d %d\n", &row, &col) < 2) {
@@ -398,10 +445,12 @@ void MPI_coo_load_matrix(char *filename, COO_Matrix *matrix_loc, INFO_Matrix *ma
 	free(rows_per_proc); free(nz_per_proc);
 
 #else
+
+	/* グローバルの行数をプロセス数で割り、ローカルの行数を決定 */
     int rows_per_proc = m / numprocs;
     int extra_rows = m % numprocs;
-    int start_row = myid * rows_per_proc + (myid < extra_rows ? myid : extra_rows);
-    int end_row = start_row + rows_per_proc + (myid < extra_rows ? 1 : 0);
+    int start_row = myid * rows_per_proc + (myid < extra_rows ? myid : extra_rows);	/* グローバルの行列の内、プロセスが担当する開始の行 */
+    int end_row = start_row + rows_per_proc + (myid < extra_rows ? 1 : 0);			/* グローバルの行列の内、プロセスが担当する終了の行 */
 
     for (int proc = 0; proc < numprocs; proc++) {
         int proc_rows_per_proc = m / numprocs;
@@ -409,10 +458,11 @@ void MPI_coo_load_matrix(char *filename, COO_Matrix *matrix_loc, INFO_Matrix *ma
         int proc_start_row = proc * proc_rows_per_proc + (proc < proc_extra_rows ? proc : proc_extra_rows);
         int proc_end_row = proc_start_row + proc_rows_per_proc + (proc < proc_extra_rows ? 1 : 0);
         
-        matrix_info->recvcounts[proc] = proc_end_row - proc_start_row;
-        matrix_info->displs[proc] = proc_start_row;
+        matrix_info->recvcounts[proc] = proc_end_row - proc_start_row;	/* 各プロセスの担当する行数 */
+        matrix_info->displs[proc] = proc_start_row;						/* 各プロセスが担当する行列の、グローバルの内の開始の行 */
     }
 
+	/* ローカル行列の非ゼロ要素数をカウント */
     nz_loc = 0;
     for (int i = start_row; i < end_row; i++) {
         nz_loc += nz_per_row[i];
@@ -428,11 +478,12 @@ void MPI_coo_load_matrix(char *filename, COO_Matrix *matrix_loc, INFO_Matrix *ma
     matrix_loc->row  = (unsigned int *)malloc(nz_loc * sizeof(unsigned int));
     matrix_loc->col  = (unsigned int *)malloc(nz_loc * sizeof(unsigned int));
 
-    // ファイルポインタを再度先頭に戻す
+    /* ファイルポインタを再度先頭に戻す */
     fseek(file, 0, SEEK_SET);
-    mm_read_banner(file, &code); // バナーを再度読み込み
-    mm_read_mtx_crd_size(file, &m, &n, &nz); // 行列サイズを再度読み込み
+    mm_read_banner(file, &code);				/* バナーを再度読み込み */
+    mm_read_mtx_crd_size(file, &m, &n, &nz);	/* 行列の情報を再度読み込み */
 
+	/* 全ての非ゼロ要素を再度読み取る ここでは、ローカルの行列に格納する */
     nz_loc = 0;
     for (int i = 0; i < nz; i++) {
 		if (mm_is_pattern(code)) {
@@ -460,9 +511,13 @@ void MPI_coo_load_matrix(char *filename, COO_Matrix *matrix_loc, INFO_Matrix *ma
         }
     }
 
-    fclose(file);
+    fclose(file);	/* ファイルを閉じる */
 }
 
+/******************************************************************************
+ * @fn      MPI_csr_load_matrix
+ * @brief   行列を行方向に分割したCOO形式の行列をCSR形式に変換
+ ******************************************************************************/
 void MPI_csr_load_matrix(char *filename, CSR_Matrix *matrix_loc, INFO_Matrix *matrix_info) {
     COO_Matrix *temp = (COO_Matrix *)malloc(sizeof(COO_Matrix));
     coo_init_matrix(temp);
@@ -472,6 +527,45 @@ void MPI_csr_load_matrix(char *filename, CSR_Matrix *matrix_loc, INFO_Matrix *ma
     coo_free_matrix(temp); free(temp);
 }
 
+/******************************************************************************
+ * @fn      MPI_csr_spmv
+ * @brief   ローカルのベクトルをAllgathervで集約し、ローカル行列とベクトルの積を計算
+ ******************************************************************************/
+void MPI_csr_spmv(CSR_Matrix *matrix_loc, INFO_Matrix *matrix_info, double *x_loc, double *x, double *y_loc) {
+	int i;
+
+	MPI_Allgatherv(x_loc, matrix_loc->rows, MPI_DOUBLE, x, matrix_info->recvcounts, matrix_info->displs, MPI_DOUBLE, MPI_COMM_WORLD);
+
+    for (i = 0; i < matrix_loc->rows; i++) {
+        y_loc[i] = 0.0;
+    }
+	mult(matrix_loc, x, y_loc);
+}
+
+/******************************************************************************
+ * @fn      MPI_coo_load_matrix_block
+ * @brief   行列を行方向に分割して、対角ブロックと非対角ブロックに分けてCOO形式で読み込む
+ * 
+ * 	|----|--------------|
+ *  | d0 |	     od0  	| <- proc 0
+ *  |----|----|---------|
+ *  |od1 | d1 |	 od1	| <- proc 1
+ *  |----|----|----|----|
+ *  |  od2    |	d2 |od2	| <- proc 2
+ *  |---------|----|----|
+ *  |  od3         | d3 | <- proc 3
+ *  |--------------|----|
+ * 
+ * @param   filename   		: matrix market形式のデータファイル
+ * @param   matrix_loc_diag : 分割したローカルの対角ブロック(COO形式)
+ * @param   matrix_loc_offd	: 分割したローカルの非対角ブロック(COO形式)
+ * @param 	matrix_info		: 行列のサイズや分割サイズの情報
+ * @sa
+ * @detail  ローカルの行数はグローバルの行数をプロセス数で割ったもの
+ * 			最初にローカルで保持するメモリのサイズを決めるため、1回データを全て読み取り非ゼ
+ * 			ロ要素数をカウント　その後、確保したメモリにデータを格納するためもう一度データを
+ * 			全て読み取る
+ ******************************************************************************/
 void MPI_coo_load_matrix_block(char *filename, COO_Matrix *matrix_loc_diag, COO_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info) {
     int numprocs, myid;
     MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
@@ -482,8 +576,9 @@ void MPI_coo_load_matrix_block(char *filename, COO_Matrix *matrix_loc_diag, COO_
     FILE *file;
     MM_typecode code;
 
-    file = fopen(filename, "r");
+    file = fopen(filename, "r");	/* ファイルを開く */
 
+	/* バナーと行列の情報を読み取る */
     if (mm_read_banner(file, &code) != 0) {
         fprintf(stderr, "ERROR: Could not process Matrix Market banner.\n");
         exit(EXIT_FAILURE);
@@ -601,6 +696,10 @@ void MPI_coo_load_matrix_block(char *filename, COO_Matrix *matrix_loc_diag, COO_
     fclose(file);
 }
 
+/******************************************************************************
+ * @fn      MPI_csr_load_matrix_block
+ * @brief   行列を対角ブロックと非対角ブロックに分割したCOO形式の行列をCSR形式に変換
+ ******************************************************************************/
 void MPI_csr_load_matrix_block(char *filename, CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info) {
     COO_Matrix *temp_diag = (COO_Matrix *)malloc(sizeof(COO_Matrix));
     COO_Matrix *temp_offd = (COO_Matrix *)malloc(sizeof(COO_Matrix));
@@ -620,19 +719,13 @@ void MPI_csr_load_matrix_block(char *filename, CSR_Matrix *matrix_loc_diag, CSR_
     coo_free_matrix(temp_offd); free(temp_offd);
 }
 
-void MPI_csr_spmv(CSR_Matrix *matrix_loc, INFO_Matrix *matrix_info, double *x_loc, double *x, double *y_loc) {
-	int i;
-
-	MPI_Request x_req;
-	MPI_Iallgatherv(x_loc, matrix_loc->rows, MPI_DOUBLE, x, matrix_info->recvcounts, matrix_info->displs, MPI_DOUBLE, MPI_COMM_WORLD, &x_req);
-	MPI_Wait(&x_req, MPI_STATUS_IGNORE);
-
-    for (i = 0; i < matrix_loc->rows; i++) {
-        y_loc[i] = 0.0;
-    }
-	mult(matrix_loc, x, y_loc);
-}
-
+/******************************************************************************
+ * @fn      MPI_csr_spmv_ovlap
+ * @brief   Iallgathervでベクトルを集約している間に、対角ブロックとローカルのベクトルの積
+ * 			を計算することでオーバーラップ
+ * 			ベクトルの集約が終わったら、残りの非対角ブロックとベクトルの積を計算
+ * 			今回の実装ではこれを採用
+ ******************************************************************************/
 void MPI_csr_spmv_ovlap(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info, double *x_loc, double *x, double *y_loc) {
 	int i;
 	
@@ -648,6 +741,13 @@ void MPI_csr_spmv_ovlap(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd
 	mult(matrix_loc_offd, x, y_loc);
 }
 
+/******************************************************************************
+ * @fn      MPI_csr_spmv_async
+ * @brief   IsendとIrecvを使い、各プロセスでベクトルを送受信する
+ * 			その間に、対角ブロックとローカルのベクトルの積を計算
+ * 			Waitsomeを使い、通信が終わったベクトルから非対角ブロックとの積を計算
+ * 			Allgathervに比べて通信に時間がかかってしまうため今回は使わない(改善したい)
+ ******************************************************************************/
 void MPI_csr_spmv_async(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info, double *x_loc, double **x_recv, double *y_loc, int numsend, int myid, int *recv_procs) {
 	int i, j, recvs_outstanding, completed, idx, recv_idx, start_idx, end_idx;
 	int row, col_idx;
@@ -692,6 +792,10 @@ void MPI_csr_spmv_async(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd
     }
 }
 
+/******************************************************************************
+ * @fn      mult
+ * @brief   ローカルの行列とベクトルの積を計算
+ ******************************************************************************/
 void mult(CSR_Matrix *A_loc, double *x, double *y_loc) {
 	unsigned int    i, j, end;
 	double          tempy;
@@ -712,6 +816,10 @@ void mult(CSR_Matrix *A_loc, double *x, double *y_loc) {
 	}
 }
 
+/******************************************************************************
+ * @fn      mult
+ * @brief   ローカルの行列とローカルのベクトルの積を計算
+ ******************************************************************************/
 void mult_block(CSR_Matrix* A_loc, double* x_part, double* y_loc, int start_index, int end_index) {
     int row, idx, global_idx, local_idx;
 	for (row = 0; row < A_loc->rows; row++) {

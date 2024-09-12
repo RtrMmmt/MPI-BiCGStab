@@ -1,12 +1,12 @@
 #include "solver.h"
 
-#define  EPS        1.0e-8  /* 収束判定条件 */
-#define  MAX_ITER   10000   /* 最大反復回数 */
+#define  EPS        1.0e-15  /* 収束判定条件 */
+#define  MAX_ITER   1000   /* 最大反復回数 */
 
 #define  MEASURE_TIME       /* 時間計測 */
 
 //#define  DISPLAY_RESIDUAL   /* 残差表示 */
-#define  OUT_ITER   100     /* 残差表示の反復間隔 */
+//#define  OUT_ITER   20     /* 残差の表示間隔 */
 
 /******************************************************************************
  * @fn      bicgstab
