@@ -13,12 +13,24 @@
  * @brief   BiCGSTAB法
  * @param   A_loc_diag : 行列Aの対角ブロック
  * @param   A_loc_offd : 行列Aの非対角ブロック
- * @param   A_info     : 行列Aの情報
+ * @param   A_info     : 行列Aの情報(行数、列数、非ゼロ要素数と分割方法)
  * @param   x_loc      : 解ベクトル
  * @param   r_loc      : 右辺ベクトルおよび残差ベクトル
  * @return  実行した反復回数
  * @sa
  * @detail  行列、ベクトルを行方向に分割して受け取り、BiCGSTAB法を実行
+ *          行列は行方向に分割して、対角ブロックと非対角ブロックに分けてCSR形式で格納
+ *
+ * 	|----|--------------|
+ *  | d0 |	     od0  	| <- proc 0
+ *  |----|----|---------|
+ *  |od1 | d1 |	 od1	| <- proc 1
+ *  |----|----|----|----|
+ *  |  od2    |	d2 |od2	| <- proc 2
+ *  |---------|----|----|
+ *  |  od3         | d3 | <- proc 3
+ *  |--------------|----|
+ * 
  ******************************************************************************/
 int bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_info, double *x_loc, double *r_loc) {
 
