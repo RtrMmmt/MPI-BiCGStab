@@ -48,7 +48,6 @@ int  csr_load_matrix(char* filename, CSR_Matrix *m);
 
 void MPI_coo_load_matrix_block(char *filename, COO_Matrix *matrix_loc_diag, COO_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info);
 void MPI_csr_load_matrix_block(char *filename, CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info);
-
 void MPI_csr_spmv_ovlap(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info, double *x_loc, double *x, double *y_loc);
 void MPI_csr_spmv_async(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd, INFO_Matrix *matrix_info, double *x_loc, double **x_recv, double *y_loc, int numsend, int myid, int *recv_procs);
 void mult(CSR_Matrix *A_loc, double *x, double *y_loc);

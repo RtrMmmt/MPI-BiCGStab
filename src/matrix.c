@@ -94,8 +94,8 @@ int coo_load_matrix(char* filename, COO_Matrix *coo) {
 }
 
 /******************************************************************************
- * @fn      coo_mv, coo_mv_sym, coo_copy
- * @brief   COO形式のベクトル行列積（非対称、対称）、データのコピー
+ * @fn     	coo_copy
+ * @brief   COO形式のデータのコピー
  ******************************************************************************/
 
 void coo_copy(COO_Matrix *in, COO_Matrix *out) {
