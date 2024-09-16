@@ -81,9 +81,9 @@ int main(int argc, char *argv[]) {
     INFO_Matrix A_info;
     A_info.recvcounts = (int *)malloc(numprocs * sizeof(int));
     A_info.displs = (int *)malloc(numprocs * sizeof(int));
-	  CSR_Matrix *A_loc_diag = (CSR_Matrix *)malloc(sizeof(CSR_Matrix));
+	CSR_Matrix *A_loc_diag = (CSR_Matrix *)malloc(sizeof(CSR_Matrix));
     CSR_Matrix *A_loc_offd = (CSR_Matrix *)malloc(sizeof(CSR_Matrix));
-	  csr_init_matrix(A_loc_diag);
+	csr_init_matrix(A_loc_diag);
     csr_init_matrix(A_loc_offd);
 
     /* 行列の読み取り */
@@ -142,11 +142,11 @@ int main(int argc, char *argv[]) {
 
     //if (myid == 0) printf("x[0] = %f, Total iter: %d\n", x_loc[0], total_iter);
 
-	  csr_free_matrix(A_loc_diag); free(A_loc_diag);
+	csr_free_matrix(A_loc_diag); free(A_loc_diag);
     csr_free_matrix(A_loc_offd); free(A_loc_offd);
     free(x_loc); free(r_loc); free(x); free(r);
     free(A_info.recvcounts);  free(A_info.displs);
 
-	  MPI_Finalize();
-	  return 0;
+	MPI_Finalize();
+	return 0;
 }

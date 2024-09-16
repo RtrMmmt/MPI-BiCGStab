@@ -5,8 +5,8 @@
 
 #define  MEASURE_TIME       /* 時間計測 */
 
-//#define  DISPLAY_RESIDUAL   /* 残差表示 */
-//#define  OUT_ITER   20     /* 残差の表示間隔 */
+#define  DISPLAY_RESIDUAL   /* 残差表示 */
+#define  OUT_ITER   100     /* 残差の表示間隔 */
 
 /******************************************************************************
  * @fn      bicgstab
