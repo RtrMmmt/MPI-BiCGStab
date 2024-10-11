@@ -71,79 +71,71 @@ int shifted_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix
     MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);
     my_dcopy(vec_loc_size, r_loc, r_hat_loc);   /* r# <- r = b */
     for (i = 0; i < sigma_len; i++) {
-        my_dcopy(vec_loc_size, r_loc, &p_loc_set[i * vec_loc_size]);    /* p_sigma <- b */
+        my_dcopy(vec_loc_size, r_loc, &p_loc_set[i * vec_loc_size]);    /* p[sigma] <- b */
         beta_set[i] = 0.0;      /* beta[sigma] <- 0 */
-        tau_set[i] = 1.0;       /* tau[sigma] <- 1 */
+        alpha_set[i] = 1.0;     /* alpha[sigma] <- 1 */
         xi_old_set[i] = 1.0;    /* xi_old[sigma] <- 1 */
         xi_curr_set[i] = 1.0;   /* xi_curr[sigma] <- 1 */
+        tau_set[i] = 1.0;       /* tau[sigma] <- 1 */
     }
     MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
 
     dot_r = rTr;    /* (r,r) */
-    dot_zero = rTr; /* (r,r) */
+    dot_zero = rTr; /* (r#,r#) */
     max_xi = 1.0;   /* max(|xi_curr|) */
 
     while (max_xi * max_xi * dot_r > tol * tol * dot_zero && k < max_iter) {
 
         MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, &p_loc_set[0], vec, s_loc);  /* s <- A p[0] */
-        rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc);  /* rTs <- (r#,s) */
-        MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);
+        rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc); MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);  /* rTs <- (r#,s) */
+        for (j = 1; j < sigma_len; j++) {
+            beta_set[j] = (xi_curr_set[j] / xi_old_set[j]) * (xi_curr_set[j] / xi_old_set[j]) * beta_set[0]; /* beta[sigma] <- (xi_new[sigma] / xi_curr[sigma])^2 beta[0] */
+            my_dscal(vec_loc_size, beta_set[j], &p_loc_set[j * vec_loc_size]);      /* p[sigma] <- tau[sigma] xi_new[sigma] r +  beta[sigma] p[sigma] */
+            my_daxpy(vec_loc_size, tau_set[j] * xi_curr_set[j], r_loc, &p_loc_set[j * vec_loc_size]);
+        }
         my_dcopy(vec_loc_size, r_loc, r_old_loc);   /* r_old <- r */
         alpha_old = alpha_set[0];       /* alpha_old <- alpha[0] */
         beta_old = beta_set[0];         /* beta_old <- beta[0] */
         MPI_Wait(&rTs_req, MPI_STATUS_IGNORE);
 
         alpha_set[0] = rTr / rTs;   /* alpha[0] <- (r#,r)/(r#,s) */
+        my_daxpy(vec_loc_size, -alpha_set[0], s_loc, r_loc);   /* q <- r - alpha[0] s */
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, y_loc);  /* y <- A q */
+
+        rTy = my_ddot(vec_loc_size, r_loc, y_loc); MPI_Iallreduce(MPI_IN_PLACE, &rTy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTy_req);  /* (q,y) */
+        yTy = my_ddot(vec_loc_size, y_loc, y_loc); MPI_Iallreduce(MPI_IN_PLACE, &yTy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &yTy_req);  /* (y,y) */
         for (j = 1; j < sigma_len; j++) {
             xi_new_set[j] = (xi_curr_set[j] * xi_old_set[j] * alpha_old) / (alpha_set[0] * beta_old * (xi_old_set[j] - xi_curr_set[j]) + xi_old_set[j] * alpha_old * (1.0 + alpha_set[0] * sigma[j]));
             /* xi_new[sigma] = (xi_curr[sigma] * xi_old[sigma] * alpha_old) / (alpha[0] * beta_old * (xi_old[sigma] - xi_curr[sigma]) + xi_old[sigma] * alpha_old * (1.0 + alpha[0] * sigma[sigma])) */
             alpha_set[j] = (xi_new_set[j] / xi_curr_set[j]) * alpha_set[0];     /* alpha[sigma] <- (xi_new[sigma] / xi_curr[sigma]) alpha[0] */
         }
-        my_daxpy(vec_loc_size, -alpha_set[0], s_loc, r_loc);   /* q <- r - alpha[0] s */
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, y_loc);  /* y <- A q */
-
-        rTy = my_ddot(vec_loc_size, r_loc, y_loc);  /* (q,y) */
-        MPI_Iallreduce(MPI_IN_PLACE, &rTy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTy_req);
-        //MPI_Iallreduce(MPI_IN_PLACE, &rTy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &reqs1[0]);
-        yTy = my_ddot(vec_loc_size, y_loc, y_loc);  /* (y,y) */
-        MPI_Iallreduce(MPI_IN_PLACE, &yTy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &yTy_req);
-        //MPI_Iallreduce(MPI_IN_PLACE, &yTy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &reqs1[1]);
         MPI_Wait(&rTy_req, MPI_STATUS_IGNORE);
         MPI_Wait(&yTy_req, MPI_STATUS_IGNORE);
-        //MPI_Waitall(2, reqs1, MPI_STATUS_IGNORE);
 
         omega_set[0] = rTy / yTy;  /* omega[0] <- (q,y)/(y,y) */
+        my_daxpy(vec_loc_size, alpha_set[0], &p_loc_set[0], x_loc_set);     /* x[0] <- x[0] + alpha[0] p[0] + omega[0] q */
+        my_daxpy(vec_loc_size, omega_set[0], r_loc, x_loc_set);
         for (j = 1; j < sigma_len; j++) {
             omega_set[j] = omega_set[0] / (1.0 + omega_set[0] * sigma[j]);      /* omega[sigma] <- omega[0] / (1.0 + omega[0] * sigma) */
             my_daxpy(vec_loc_size, omega_set[j] * tau_set[j] * xi_new_set[j], r_loc, &x_loc_set[j * vec_loc_size]);     /* x[sigma] <- x[sigma] + alpha[sigma] p[sigma] + omega[sigma] tau[sigma] xi_new[sigma] q */
-            my_daxpy(vec_loc_size, alpha_set[0], &p_loc_set[j * vec_loc_size], &x_loc_set[j * vec_loc_size]);
+            my_daxpy(vec_loc_size, alpha_set[j], &p_loc_set[j * vec_loc_size], &x_loc_set[j * vec_loc_size]);
             my_daxpy(vec_loc_size, omega_set[j] * tau_set[j] * xi_new_set[j] / alpha_set[j], r_loc, &p_loc_set[j * vec_loc_size]);      /* p[sigma] <- p[sigma] + omega[sigma] tau[sigma] / alpha[sigma] (xi_new[sigma] q - xi_curr[sigma] r_old) */
             my_daxpy(vec_loc_size, - omega_set[j] * tau_set[j] * xi_curr_set[j] / alpha_set[j], r_old_loc, &p_loc_set[j * vec_loc_size]);
+        }
+        my_daxpy(vec_loc_size, -omega_set[0], y_loc, r_loc);            /* r <- q - omega[0] y */
+        dot_r = my_ddot(vec_loc_size, r_loc, r_loc); MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);  /* (r,r) */
+        rTr_old = rTr;      /* r_old <- (r#,r) */
+        rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc); MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);  /* (r#,r) */
+        for (j = 1; j < sigma_len; j++) {
             tau_set[j] = tau_set[j] / (1.0 + omega_set[0] * sigma[j]);      /* tau[sigma] <- tau[sigma] / (1 + omega[0] sigma) */
         }
-        my_daxpy(vec_loc_size, alpha_set[0], p_loc_set, x_loc_set);     /* x[0] <- x[0] + alpha[0] p[0] + omega[0] q */
-        my_daxpy(vec_loc_size, omega_set[0], r_loc, x_loc_set);
-        my_daxpy(vec_loc_size, -omega_set[0], y_loc, r_loc);            /* r <- q - omega[0] y */
-        dot_r = my_ddot(vec_loc_size, r_loc, r_loc);    /* (r,r) */
-        MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);
-        //MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &reqs2[0]);
-        rTr_old = rTr;      /* r_old <- (r#,r) */
-        rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc);  /* (r#,r) */
-        MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);
-        //MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &reqs2[1]);
         MPI_Wait(&dot_r_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
-        //MPI_Waitall(2, reqs2, MPI_STATUS_IGNORE);
 
         beta_set[0] = (alpha_set[0] / omega_set[0]) * (rTr / rTr_old);   /* beta[0] <- (alpha[0] / omega[0]) ((r#,r)/(r#,r)) */
         max_xi = 1.0;
         for (j = 1; j < sigma_len; j++) {
-            beta_set[j] = (xi_new_set[j] / xi_curr_set[j]) * (xi_new_set[j] / xi_curr_set[j]) * beta_set[0]; /* beta[sigma] <- (xi_new[sigma] / xi_curr[sigma])^2 beta[0] */
-            my_dscal(vec_loc_size, beta_set[j], &p_loc_set[j * vec_loc_size]);      /* p[sigma] <- tau[sigma] xi_new[sigma] r +  beta[sigma] p[sigma] */
-            my_daxpy(vec_loc_size, tau_set[j] * xi_new_set[j], r_loc, &p_loc_set[j * vec_loc_size]);
-            //xi_old_set[j] = xi_curr_set[j];     /* xi_old[sigma] <- xi_curr[sigma] */
-            //xi_curr_set[j] = xi_new_set[j];     /* xi_curr[sigma] <- xi_new[sigma] */
-            abs_xi = fabs(xi_new_set[j]);
+            abs_xi = fabs(xi_curr_set[j] * tau_set[j]);
             if (abs_xi > max_xi) max_xi = abs_xi;   /* max(|xi_curr|) */
         }
         my_dcopy(sigma_len, xi_curr_set, xi_old_set);   /* xi_old[sigma] <- xi_curr[sigma] */
