@@ -97,7 +97,7 @@ int shifted_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix
         for (j = 1; j < sigma_len; j++) {
             xi_new_set[j] = (xi_curr_set[j] * xi_old_set[j] * alpha_old) / (alpha_set[0] * beta_old * (xi_old_set[j] - xi_curr_set[j]) + xi_old_set[j] * alpha_old * (1.0 + alpha_set[0] * sigma[j]));
             /* xi_new[sigma] = (xi_curr[sigma] * xi_old[sigma] * alpha_old) / (alpha[0] * beta_old * (xi_old[sigma] - xi_curr[sigma]) + xi_old[sigma] * alpha_old * (1.0 + alpha[0] * sigma[sigma])) */
-            alpha_set[j] = xi_new_set[j] / (xi_curr_set[j] * alpha_set[0]);     /* alpha[sigma] <- xi_new[sigma] / (xi_curr[sigma] alpha[sigma]) */
+            alpha_set[j] = (xi_new_set[j] / xi_curr_set[j]) * alpha_set[0];     /* alpha[sigma] <- (xi_new[sigma] / xi_curr[sigma]) alpha[0] */
         }
         my_daxpy(vec_loc_size, -alpha_set[0], s_loc, r_loc);   /* q <- r - alpha[0] s */
         MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, y_loc);  /* y <- A q */
@@ -116,7 +116,7 @@ int shifted_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix
         for (j = 1; j < sigma_len; j++) {
             omega_set[j] = omega_set[0] / (1.0 + omega_set[0] * sigma[j]);      /* omega[sigma] <- omega[0] / (1.0 + omega[0] * sigma) */
             my_daxpy(vec_loc_size, omega_set[j] * tau_set[j] * xi_new_set[j], r_loc, &x_loc_set[j * vec_loc_size]);     /* x[sigma] <- x[sigma] + alpha[sigma] p[sigma] + omega[sigma] tau[sigma] xi_new[sigma] q */
-            my_daxpy(vec_loc_size, alpha_set[0], p_loc_set + j * vec_loc_size, &x_loc_set[j * vec_loc_size]);
+            my_daxpy(vec_loc_size, alpha_set[0], &p_loc_set[j * vec_loc_size], &x_loc_set[j * vec_loc_size]);
             my_daxpy(vec_loc_size, omega_set[j] * tau_set[j] * xi_new_set[j] / alpha_set[j], r_loc, &p_loc_set[j * vec_loc_size]);      /* p[sigma] <- p[sigma] + omega[sigma] tau[sigma] / alpha[sigma] (xi_new[sigma] q - xi_curr[sigma] r_old) */
             my_daxpy(vec_loc_size, - omega_set[j] * tau_set[j] * xi_curr_set[j] / alpha_set[j], r_old_loc, &p_loc_set[j * vec_loc_size]);
             tau_set[j] = tau_set[j] / (1.0 + omega_set[0] * sigma[j]);      /* tau[sigma] <- tau[sigma] / (1 + omega[0] sigma) */
