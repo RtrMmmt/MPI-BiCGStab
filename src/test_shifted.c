@@ -83,8 +83,12 @@ int main(int argc, char *argv[]) {
     }
 
     /* ベクトルの初期化 */
-    double sigma[] = {0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07};
-    int sigma_len = 8;
+    int sigma_len = 10;
+    double sigma[sigma_len];
+
+    for (int i = 0; i < sigma_len; ++i) {
+        sigma[i] = i * 0.01;
+    }
     double *x_loc_set, *r_loc, *x, *r;
     int vec_size = A_info.rows;
     int vec_loc_size = A_loc_diag->rows;
