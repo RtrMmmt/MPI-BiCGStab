@@ -53,4 +53,6 @@ void MPI_csr_spmv_async(CSR_Matrix *matrix_loc_diag, CSR_Matrix *matrix_loc_offd
 void mult(CSR_Matrix *A_loc, double *x, double *y_loc);
 void mult_block(CSR_Matrix* A_loc, double* x_part, double* y_loc, int start_index, int end_index);
 
+void csr_shift_diagonal(CSR_Matrix *A_diag, double sigma);
+
 #endif // MATRIX_H

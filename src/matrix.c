@@ -531,3 +531,22 @@ void mult_block(CSR_Matrix* A_loc, double* x_part, double* y_loc, int start_inde
         }
     }
 }
+
+
+void csr_shift_diagonal(CSR_Matrix *A_diag, double sigma) {
+    int diagonal_found;
+    for (int i = 0; i < A_diag->rows; i++) {
+        diagonal_found = 0;  // 各行の対角成分が見つかったかを確認するフラグ
+        for (int j = A_diag->ptr[i]; j < A_diag->ptr[i + 1]; j++) {
+            if (A_diag->col[j] == i) {
+                A_diag->val[j] += sigma;
+                diagonal_found = 1;  // 対角成分が見つかった
+                break;  // 対角成分は一つだけのはずなので、ループを抜ける
+            }
+        }
+        if (!diagonal_found) {  // 対角成分が見つからなかった場合
+            fprintf(stderr, "Error: Diagonal element not found in row %d.\n", i);
+            exit(EXIT_FAILURE);  // エラーメッセージを表示して終了
+        }
+    }
+}

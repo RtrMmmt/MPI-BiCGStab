@@ -111,9 +111,9 @@ int main(int argc, char *argv[]) {
     }
 
     int total_iter;
-
+    int seed = 0;
     /* 実行 */
-    total_iter = shifted_bicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len);
+    total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
 
     for (int i = 0; i < sigma_len; i++) {
         //if (i != 0) csr_shift_diagonal(A_loc_diag, 0.01);
