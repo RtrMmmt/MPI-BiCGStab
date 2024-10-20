@@ -83,11 +83,12 @@ int main(int argc, char *argv[]) {
     }
 
     /* ベクトルの初期化 */
-    int sigma_len = 10;
+    int sigma_len = 1000;
     double sigma[sigma_len];
+    int seed = 58;
 
     for (int i = 0; i < sigma_len; ++i) {
-        sigma[i] = i * 0.01;
+        sigma[i] = i * 0.01 + 0.01;
     }
     double *x_loc_set, *r_loc, *x, *r;
     int vec_size = A_info.rows;
@@ -98,10 +99,11 @@ int main(int argc, char *argv[]) {
     r = (double *)malloc(vec_size * sizeof(double));
 
     for (int i = 0; i < vec_loc_size; i++) {
-        x_loc_set[i] = 1; /* 厳密解はすべて1 */
+        x_loc_set[seed * vec_loc_size + i] = 1; /* 厳密解はすべて1 */
     }
 
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, &A_info, x_loc_set, x, r_loc);
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, &A_info, &x_loc_set[seed * vec_loc_size], x, r_loc);
+    my_daxpy(vec_loc_size, sigma[seed], &x_loc_set[seed * vec_loc_size], r_loc);
 
     double *ans_loc = (double *)malloc(vec_loc_size * sizeof(double));
     my_dcopy(vec_loc_size, r_loc, ans_loc);
@@ -111,17 +113,15 @@ int main(int argc, char *argv[]) {
     }
 
     int total_iter;
-    int seed = 0;
     /* 実行 */
+    //total_iter = shifted_bicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len);
     total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
 
     for (int i = 0; i < sigma_len; i++) {
         //if (i != 0) csr_shift_diagonal(A_loc_diag, 0.01);
         //MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, &A_info, &x_loc_set[i * vec_loc_size], x, r_loc);
         MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, &A_info, &x_loc_set[i * vec_loc_size], x, r_loc);
-        for (int j = 0; j < vec_loc_size; j++) {
-            r_loc[j] += sigma[i];
-        }
+        my_daxpy(vec_loc_size, sigma[i], &x_loc_set[i * vec_loc_size], r_loc);
 
         double diff;
         double local_diff_norm_2 = 0;
@@ -137,7 +137,8 @@ int main(int argc, char *argv[]) {
 
         double rerative_error = sqrt(global_diff_norm_2) / sqrt(global_ans_norm_2);
         if (myid == 0) {
-            printf("sigma: %.2f, relative error: %e\n", sigma[i], rerative_error);
+            if (i == seed) printf("#seed: %.2f, relative error: %e\n", sigma[i], rerative_error);
+            else printf("sigma: %.2f, relative error: %e\n", sigma[i], rerative_error);
         }
     }
 

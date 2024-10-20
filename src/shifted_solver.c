@@ -79,6 +79,7 @@ int shifted_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix
         tau_set[i] = 1.0;       /* tau[sigma] <- 1 */
     }
     MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
+    if (myid == 0) printf("rTr = %e\n", rTr);
 
     dot_r = rTr;    /* (r,r) */
     dot_zero = rTr; /* (r#,r#) */
@@ -99,6 +100,7 @@ int shifted_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix
         MPI_Wait(&rTs_req, MPI_STATUS_IGNORE);
 
         alpha_set[0] = rTr / rTs;   /* alpha[0] <- (r#,r)/(r#,s) */
+        //if (myid == 0) printf("alpha[0] = %e\n", alpha_set[0]);
         my_daxpy(vec_loc_size, -alpha_set[0], s_loc, r_loc);   /* q <- r - alpha[0] s */
         MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, y_loc);  /* y <- A q */
 
@@ -221,14 +223,15 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
 
     vec         = (double *)malloc(vec_size * sizeof(double));
 
-    p_loc_set   = (double *)calloc(vec_loc_size * sigma_len, sizeof(double)); /* ゼロで初期化 */
+    p_loc_set   = (double *)calloc(vec_loc_size * sigma_len, sizeof(double)); /* 安全のためゼロで初期化(下でもOK) */
+    //p_loc_set   = (double *)malloc(vec_loc_size * sigma_len * sizeof(double));
     alpha_set   = (double *)malloc(sigma_len * sizeof(double));
     beta_set    = (double *)malloc(sigma_len * sizeof(double));
     omega_set   = (double *)malloc(sigma_len * sizeof(double));
     eta_set     = (double *)malloc(sigma_len * sizeof(double));
     zeta_set    = (double *)malloc(sigma_len * sizeof(double));
     pi_new_set  = (double *)malloc(sigma_len * sizeof(double));
-    pi_new_set  = (double *)malloc(sigma_len * sizeof(double));
+    pi_old_set  = (double *)malloc(sigma_len * sizeof(double));
 
 #ifdef MEASURE_TIME
         start_time = MPI_Wtime();
@@ -246,23 +249,25 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
         pi_new_set[i] = 1.0;    /* pi_new[sigma] <- 1 */
         zeta_set[i] = 1.0;       /* zeta[sigma] <- 1 */
     }
-    csr_shift_diagonal(A_loc_diag, sigma[seed]);
+    my_dcopy(vec_loc_size, r_loc, &p_loc_set[seed * vec_loc_size]);
     MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
 
     dot_r = rTr;    /* (r,r) */
     dot_zero = rTr; /* (r#,r#) */
-    max_zeta_pi = 1.0;   /* max(|zeta/pi|) */
+    max_zeta_pi = 1.0;   /* max(|1/(zeta pi)|) */
 
     while (max_zeta_pi * max_zeta_pi * dot_r > tol * tol * dot_zero && k < max_iter) {
 
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, &p_loc_set[seed * vec_loc_size], vec, s_loc);  /* s <- A p[seed] */
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, &p_loc_set[seed * vec_loc_size], vec, s_loc);  /* s <- (A + sigma[seed] I) p[seed] */
+        my_daxpy(vec_loc_size, sigma[seed], &p_loc_set[seed * vec_loc_size], s_loc);
         rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc); MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);  /* rTs <- (r#,s) */
         for (j = 0; j < sigma_len; j++) {
             if (j == seed) continue;
             beta_set[j] = (pi_old_set[j] / pi_new_set[j]) * (pi_old_set[j] / pi_new_set[j]) * beta_set[seed]; /* beta[sigma] <- (pi_old[sigma] / pi_new[sigma])^2 beta[seed] */
             my_dscal(vec_loc_size, beta_set[j], &p_loc_set[j * vec_loc_size]);      /* p[sigma] <- 1 / (pi_new[sigma] zeta[sigma]) r + beta[sigma] p[sigma] */
-            my_daxpy(vec_loc_size, 1.0 / (pi_old_set[j] * zeta_set[j]), r_loc, &p_loc_set[j * vec_loc_size]);
+            my_daxpy(vec_loc_size, 1.0 / (pi_new_set[j] * zeta_set[j]), r_loc, &p_loc_set[j * vec_loc_size]);
         }
+        my_dcopy(sigma_len, pi_new_set, pi_old_set);   /* pi_old[sigma] <- pi_new[sigma] */
         my_dcopy(vec_loc_size, r_loc, r_old_loc);   /* r_old <- r */
         alpha_old = alpha_set[seed];       /* alpha_old <- alpha[seed] */
         beta_old = beta_set[seed];         /* beta_old <- beta[seed] */
@@ -270,7 +275,8 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
 
         alpha_set[seed] = rTr / rTs;   /* alpha[seed] <- (r#,r)/(r#,s) */
         my_daxpy(vec_loc_size, -alpha_set[seed], s_loc, r_loc);   /* q <- r - alpha[seed] s */
-        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, y_loc);  /* y <- A q */
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, y_loc);  /* y <- (A + sigma[seed] I) q */
+        my_daxpy(vec_loc_size, sigma[seed], r_loc, y_loc);
 
         qTq = my_ddot(vec_loc_size, r_loc, r_loc); MPI_Iallreduce(MPI_IN_PLACE, &qTq, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &qTq_req);  /* (q,q) */
         qTy = my_ddot(vec_loc_size, r_loc, y_loc); MPI_Iallreduce(MPI_IN_PLACE, &qTy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &qTy_req);  /* (q,y) */
@@ -292,9 +298,9 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
             omega_set[j] = omega_set[seed] / (1.0 - omega_set[seed] * (sigma[seed] - sigma[j]));      /* omega[sigma] <- omega[0] / (1.0 + omega[0] * sigma) */
             my_daxpy(vec_loc_size, omega_set[j] / (pi_new_set[j] * zeta_set[j]), r_loc, &x_loc_set[j * vec_loc_size]);     /* x[sigma] <- x[sigma] + alpha[sigma] p[sigma] + omega[sigma] / (pi_new[sigma] zeta[sigma]) q */
             my_daxpy(vec_loc_size, alpha_set[j], &p_loc_set[j * vec_loc_size], &x_loc_set[j * vec_loc_size]);
-            zeta_set[j] = (1.0 - omega_set[seed] * (sigma[seed] - sigma[j])) * zeta_set[j];      /* zeta[sigma] <- (1.0 - omega[seed] (sigma[seed] - sigma[sigma])) * zeta[sigma] */
             my_daxpy(vec_loc_size, omega_set[j] / (alpha_set[j] * zeta_set[j] * pi_new_set[j]), r_loc, &p_loc_set[j * vec_loc_size]);    /* p[sigma] <- p[sigma] + omega[sigma] / (alpha[sigma] zeta[sigma]) (q / pi_new[sigma] - r_old / pi_old[sigma]) */
             my_daxpy(vec_loc_size, -omega_set[j] / (alpha_set[j] * zeta_set[j] * pi_old_set[j]), r_old_loc, &p_loc_set[j * vec_loc_size]);
+            zeta_set[j] = (1.0 - omega_set[seed] * (sigma[seed] - sigma[j])) * zeta_set[j];      /* zeta[sigma] <- (1.0 - omega[seed] (sigma[seed] - sigma[sigma])) * zeta[sigma] */
         }
         my_daxpy(vec_loc_size, -omega_set[seed], y_loc, r_loc);            /* r <- q - omega[seed] y */
         dot_r = my_ddot(vec_loc_size, r_loc, r_loc); MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);  /* (r,r) */
@@ -307,10 +313,9 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
         max_zeta_pi = 1.0;
         for (j = 0; j < sigma_len; j++) {
             if (j == seed) continue;
-            abs_zeta_pi = fabs(zeta_set[j] / pi_new_set[j]);
-            if (abs_zeta_pi > max_zeta_pi) max_zeta_pi = abs_zeta_pi;   /* max(|zeta[sigma]/pi_new[sigma]|) */
+            abs_zeta_pi = fabs(1.0 / (zeta_set[j] * pi_new_set[j]));
+            if (abs_zeta_pi > max_zeta_pi) max_zeta_pi = abs_zeta_pi;   /* max(|1/(zeta[sigma] pi[sigma])|) */
         }
-        my_dcopy(sigma_len, pi_new_set, pi_old_set);   /* pi_old[sigma] <- pi_new[sigma] */
         my_dscal(vec_loc_size, beta_set[seed], &p_loc_set[seed * vec_loc_size]);     /* p[seed] <- r + beta[seed] p[seed] - beta[seed] omega[seed] s */
         my_daxpy(vec_loc_size, 1.0, r_loc, &p_loc_set[seed * vec_loc_size]);
         my_daxpy(vec_loc_size, -beta_set[seed] * omega_set[seed], s_loc, &p_loc_set[seed * vec_loc_size]);
@@ -330,8 +335,6 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
         end_time = MPI_Wtime();
         total_time = end_time - start_time;
 #endif
-
-    csr_shift_diagonal(A_loc_diag, -sigma[seed]);
 
     if (myid == 0) {
         printf("Total iter   : %d\n", k);
