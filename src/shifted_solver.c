@@ -7,7 +7,7 @@
 
 #define MEASURE_TIME /* 時間計測 */
 
-#define DISPLAY_RESIDUAL /* 残差表示 */
+//#define DISPLAY_RESIDUAL /* 残差表示 */
 #define OUT_ITER 100     /* 残差の表示間隔 */
 
 int shifted_bicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_info, double *x_loc_set, double *r_loc, double *sigma, int sigma_len) {

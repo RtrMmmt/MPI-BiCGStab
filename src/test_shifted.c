@@ -7,6 +7,7 @@
 #include "shifted_solver.h"
 
 #define DISPLAY_NODE_INFO   /* ノード数とプロセス数の表示 */
+//#define DISPLAY_ERROR  /* 相対誤差の表示 */
 
 #define SIGMA_LENGTH 100
 #define SEED 0
@@ -121,6 +122,7 @@ int main(int argc, char *argv[]) {
     total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
     //total_iter = shifted_lopbicgstab_v2(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
 
+#ifdef DISPLAY_ERROR
     for (int i = 0; i < sigma_len; i++) {
         //if (i != 0) csr_shift_diagonal(A_loc_diag, 0.01);
         //MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, &A_info, &x_loc_set[i * vec_loc_size], x, r_loc);
@@ -145,6 +147,7 @@ int main(int argc, char *argv[]) {
             else printf("sigma: %.2f, relative error: %e\n", sigma[i], rerative_error);
         }
     }
+#endif
 
 	csr_free_matrix(A_loc_diag); free(A_loc_diag);
     csr_free_matrix(A_loc_offd); free(A_loc_offd);
