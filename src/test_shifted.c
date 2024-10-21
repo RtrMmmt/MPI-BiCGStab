@@ -8,6 +8,9 @@
 
 #define DISPLAY_NODE_INFO   /* ノード数とプロセス数の表示 */
 
+#define SIGMA_LENGTH 100
+#define SEED 0
+
 int main(int argc, char *argv[]) {
 
     MPI_Init(&argc, &argv);
@@ -83,9 +86,9 @@ int main(int argc, char *argv[]) {
     }
 
     /* ベクトルの初期化 */
-    int sigma_len = 1000;
+    int sigma_len = SIGMA_LENGTH;
     double sigma[sigma_len];
-    int seed = 58;
+    int seed = SEED;
 
     for (int i = 0; i < sigma_len; ++i) {
         sigma[i] = i * 0.01 + 0.01;
@@ -116,6 +119,7 @@ int main(int argc, char *argv[]) {
     /* 実行 */
     //total_iter = shifted_bicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len);
     total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+    //total_iter = shifted_lopbicgstab_v2(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
 
     for (int i = 0; i < sigma_len; i++) {
         //if (i != 0) csr_shift_diagonal(A_loc_diag, 0.01);
