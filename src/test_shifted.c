@@ -8,8 +8,9 @@
 
 #define DISPLAY_NODE_INFO   /* ノード数とプロセス数の表示 */
 //#define DISPLAY_ERROR  /* 相対誤差の表示 */
+//#define SOLVE_EACH_SIGMA  /* 各システムでそれぞれ反復法を適用 */
 
-#define SIGMA_LENGTH 100
+#define SIGMA_LENGTH 1
 #define SEED 0
 
 int main(int argc, char *argv[]) {
@@ -119,8 +120,9 @@ int main(int argc, char *argv[]) {
     int total_iter;
     /* 実行 */
     //total_iter = shifted_bicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len);
-    total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+    //total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
     //total_iter = shifted_lopbicgstab_v2(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+    total_iter = shifted_pipe_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
 
 #ifdef DISPLAY_ERROR
     for (int i = 0; i < sigma_len; i++) {
@@ -146,6 +148,19 @@ int main(int argc, char *argv[]) {
             if (i == seed) printf("#seed: %.2f, relative error: %e\n", sigma[i], rerative_error);
             else printf("sigma: %.2f, relative error: %e\n", sigma[i], rerative_error);
         }
+    }
+#endif
+
+#ifdef SOLVE_EACH_SIGMA
+    for (int i = 0; i < sigma_len; i++) {
+        int sigma_len_temp = 1;
+        double sigma_temp[sigma_len_temp];
+        int seed = 0;
+
+        sigma_temp[0] = sigma[i];
+
+        if(myid == 0) printf("Sigma: %f\n", sigma_temp[0]);
+        total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma_temp, sigma_len_temp, seed);
     }
 #endif
 
