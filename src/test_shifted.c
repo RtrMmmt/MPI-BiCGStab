@@ -7,7 +7,7 @@
 #include "shifted_solver.h"
 
 #define DISPLAY_NODE_INFO   /* ノード数とプロセス数の表示 */
-#define DISPLAY_ERROR  /* 相対誤差の表示 */
+//#define DISPLAY_ERROR  /* 相対誤差の表示 */
 //#define SOLVE_EACH_SIGMA  /* 各システムでそれぞれ反復法を適用 */
 
 #define SIGMA_LENGTH 10
