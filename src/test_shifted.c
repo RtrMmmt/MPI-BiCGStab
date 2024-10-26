@@ -122,8 +122,9 @@ int main(int argc, char *argv[]) {
     //total_iter = shifted_bicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len);
     //total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
     //total_iter = shifted_lopbicgstab_v2(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
-    total_iter = shifted_lopbicgstab_nooverlap(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+    //total_iter = shifted_lopbicgstab_nooverlap(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
     //total_iter = shifted_pipe_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+    total_iter = shifted_pipe_lopbicgstab_nooverlap(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
 
 #ifdef DISPLAY_ERROR
     for (int i = 0; i < sigma_len; i++) {
