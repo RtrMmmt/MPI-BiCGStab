@@ -1,12 +1,17 @@
 /******************************************************************************
  * macでのコンパイルと実行コマンド
- * mpicc -O3 src/main_shifted.c src/shifted_solver.c src/matrix.c src/vector.c src/mmio.c -I src -lm
+ * mpicc -O3 src/main_shifted.c src/shifted_switching_solver.c src/matrix.c src/vector.c src/mmio.c -I src -lm
  * mpirun -np 4 ./a.out data/atmosmodd.mtx
  ******************************************************************************/
 
-#include "shifted_solver.h"
+#include "shifted_switching_solver.h"
 
 #define DISPLAY_NODE_INFO   /* ノード数とプロセス数の表示 */
+#define DISPLAY_ERROR  /* 相対誤差の表示 */
+//#define SOLVE_EACH_SIGMA  /* 各システムでそれぞれ反復法を適用 */
+
+#define SIGMA_LENGTH 5
+#define SEED 0
 
 int main(int argc, char *argv[]) {
 
@@ -83,8 +88,14 @@ int main(int argc, char *argv[]) {
     }
 
     /* ベクトルの初期化 */
-    double sigma[] = {0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07};
-    int sigma_len = sizeof(sigma);
+    int sigma_len = SIGMA_LENGTH;
+    double sigma[sigma_len];
+    int seed = SEED;
+
+    for (int i = 0; i < sigma_len; ++i) {
+        sigma[i] = i * 0.01 + 0.01;
+        //sigma[i] = i * 0.1 + 0.1;
+    }
     double *x_loc_set, *r_loc, *x, *r;
     int vec_size = A_info.rows;
     int vec_loc_size = A_loc_diag->rows;
@@ -94,19 +105,62 @@ int main(int argc, char *argv[]) {
     r = (double *)malloc(vec_size * sizeof(double));
 
     for (int i = 0; i < vec_loc_size; i++) {
-        x_loc_set[i] = 1; /* 厳密解はすべて1 */
+        x_loc_set[seed * vec_loc_size + i] = 1; /* 厳密解はすべて1 */
     }
 
-    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, &A_info, x_loc_set, x, r_loc);
+    MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, &A_info, &x_loc_set[seed * vec_loc_size], x, r_loc);
+    my_daxpy(vec_loc_size, sigma[seed], &x_loc_set[seed * vec_loc_size], r_loc);
+
+    double *ans_loc = (double *)malloc(vec_loc_size * sizeof(double));
+    my_dcopy(vec_loc_size, r_loc, ans_loc);
 
     for (int i = 0; i < vec_loc_size * sigma_len; i++) {
         x_loc_set[i] = 0; /* 初期値はすべて0 */
     }
 
     int total_iter;
-
     /* 実行 */
-    total_iter = shifted_bicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len);
+    total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+
+#ifdef DISPLAY_ERROR
+    for (int i = 0; i < sigma_len; i++) {
+        //if (i != 0) csr_shift_diagonal(A_loc_diag, 0.01);
+        //MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, &A_info, &x_loc_set[i * vec_loc_size], x, r_loc);
+        MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, &A_info, &x_loc_set[i * vec_loc_size], x, r_loc);
+        my_daxpy(vec_loc_size, sigma[i], &x_loc_set[i * vec_loc_size], r_loc);
+
+        double diff;
+        double local_diff_norm_2 = 0;
+        double local_ans_norm_2 = 0;
+        for (int j = 0; j < vec_loc_size; j++) {
+            diff = r_loc[j] - ans_loc[j];
+            local_diff_norm_2 += diff * diff;
+            local_ans_norm_2 += ans_loc[j] * ans_loc[j];
+        }
+        double global_diff_norm_2, global_ans_norm_2;
+        MPI_Allreduce(&local_diff_norm_2, &global_diff_norm_2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        MPI_Allreduce(&local_ans_norm_2, &global_ans_norm_2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+        double rerative_error = sqrt(global_diff_norm_2) / sqrt(global_ans_norm_2);
+        if (myid == 0) {
+            if (i == seed) printf("#seed: %.2f, relative error: %e\n", sigma[i], rerative_error);
+            else printf("sigma: %.2f, relative error: %e\n", sigma[i], rerative_error);
+        }
+    }
+#endif
+
+#ifdef SOLVE_EACH_SIGMA
+    for (int i = 0; i < sigma_len; i++) {
+        int sigma_len_temp = 1;
+        double sigma_temp[sigma_len_temp];
+        int seed = 0;
+
+        sigma_temp[0] = sigma[i];
+
+        if(myid == 0) printf("Sigma: %f\n", sigma_temp[0]);
+        total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma_temp, sigma_len_temp, seed);
+    }
+#endif
 
 	csr_free_matrix(A_loc_diag); free(A_loc_diag);
     csr_free_matrix(A_loc_offd); free(A_loc_offd);
