@@ -240,8 +240,8 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
     double *alpha_set, *beta_set, *omega_set, *eta_set, *zeta_set;
     double alpha_old, beta_old;
 
-    double *alpha_seed_log, *beta_seed_log, *omega_seed_log;
-    double *pi_log_set;
+    double *alpha_seed_archive, *beta_seed_archive, *omega_seed_archive;
+    double *pi_archive_set;
 
     double dot_r, dot_zero, rTr, rTs, qTq, qTy, rTr_old;
     MPI_Request dot_r_req, rTr_req, rTs_req, qTq_req, qTy_req;
@@ -268,10 +268,10 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
     eta_set     = (double *)malloc(sigma_len * sizeof(double));
     zeta_set    = (double *)malloc(sigma_len * sizeof(double));
 
-    alpha_seed_log  = (double *)malloc(max_iter * sizeof(double));
-    beta_seed_log   = (double *)malloc(max_iter * sizeof(double));
-    omega_seed_log  = (double *)malloc(max_iter * sizeof(double));
-    pi_log_set      = (double *)malloc(max_iter * sigma_len * sizeof(double));
+    alpha_seed_archive  = (double *)malloc(max_iter * sizeof(double));
+    beta_seed_archive   = (double *)malloc(max_iter * sizeof(double));
+    omega_seed_archive  = (double *)malloc(max_iter * sizeof(double));
+    pi_archive_set      = (double *)malloc(max_iter * sigma_len * sizeof(double));
 
     stop_flag   = (bool *)calloc(sigma_len, sizeof(bool)); /* Falseで初期化 */
 
@@ -287,8 +287,8 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
         alpha_set[i]  = 1.0;  /* alpha[sigma]  <- 1 */
         beta_set[i]   = 0.0;  /* beta[sigma]   <- 0 */
         eta_set[i]    = 0.0;  /* eta[sigma]    <- 0 */
-        pi_log_set[i * max_iter + 0] = 1.0;
-        pi_log_set[i * max_iter + 1] = 1.0;
+        pi_archive_set[i * max_iter + 0] = 1.0;
+        pi_archive_set[i * max_iter + 1] = 1.0;
         zeta_set[i]   = 1.0;  /* zeta[sigma]   <- 1 */
     }
     my_dcopy(vec_loc_size, r_loc, &p_loc_set[seed * vec_loc_size]);
@@ -298,8 +298,8 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
     dot_zero = rTr; /* (r#,r#) */
     max_zeta_pi = 1.0;   /* max(|1/(zeta pi)|) */
 
-    alpha_seed_log[0] = 1.0;
-    beta_seed_log[0]  = 0.0;
+    alpha_seed_archive[0] = 1.0;
+    beta_seed_archive[0]  = 0.0;
 
     while (stop_count < sigma_len && k < max_iter) {
 
@@ -310,8 +310,8 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
         rTs = my_ddot(vec_loc_size, r_hat_loc, s_loc); MPI_Iallreduce(MPI_IN_PLACE, &rTs, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTs_req);  /* rTs <- (r#,s) */
         MPI_Wait(&rTs_req, MPI_STATUS_IGNORE);
 
-        alpha_seed_log[k] = rTr / rTs;   /* alpha[seed] <- (r#,r)/(r#,s) */
-        my_daxpy(vec_loc_size, -alpha_seed_log[k], s_loc, r_loc);   /* q <- r - alpha[seed] s */
+        alpha_seed_archive[k] = rTr / rTs;   /* alpha[seed] <- (r#,r)/(r#,s) */
+        my_daxpy(vec_loc_size, -alpha_seed_archive[k], s_loc, r_loc);   /* q <- r - alpha[seed] s */
         MPI_csr_spmv_ovlap(A_loc_diag, A_loc_offd, A_info, r_loc, vec, y_loc);  /* y <- (A + sigma[seed] I) q */
         my_daxpy(vec_loc_size, sigma[seed], r_loc, y_loc);
         qTq = my_ddot(vec_loc_size, r_loc, r_loc); MPI_Iallreduce(MPI_IN_PLACE, &qTq, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &qTq_req);  /* (q,q) */
@@ -319,41 +319,41 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
         MPI_Wait(&qTq_req, MPI_STATUS_IGNORE);
         MPI_Wait(&qTy_req, MPI_STATUS_IGNORE);
 
-        omega_seed_log[k] = qTq / qTy;  /* omega[seed] <- (q,q)/(q,y) */
-        my_daxpy(vec_loc_size, alpha_seed_log[k], &p_loc_set[seed * vec_loc_size], &x_loc_set[seed * vec_loc_size]);     /* x[seed] <- x[seed] + alpha[seed] p[seed] + omega[seed] q */
-        my_daxpy(vec_loc_size, omega_seed_log[k], r_loc, &x_loc_set[seed * vec_loc_size]);
+        omega_seed_archive[k] = qTq / qTy;  /* omega[seed] <- (q,q)/(q,y) */
+        my_daxpy(vec_loc_size, alpha_seed_archive[k], &p_loc_set[seed * vec_loc_size], &x_loc_set[seed * vec_loc_size]);     /* x[seed] <- x[seed] + alpha[seed] p[seed] + omega[seed] q */
+        my_daxpy(vec_loc_size, omega_seed_archive[k], r_loc, &x_loc_set[seed * vec_loc_size]);
         for (j = 0; j < sigma_len; j++) {
             if (j == seed) continue;
             if (stop_flag[j]) continue;
-            eta_set[j] = (beta_seed_log[k - 1] / alpha_seed_log[k - 1]) * alpha_seed_log[k] * eta_set[j] - (sigma[seed] - sigma[j]) * alpha_seed_log[k] * pi_log_set[j * max_iter + (k - 1)];
+            eta_set[j] = (beta_seed_archive[k - 1] / alpha_seed_archive[k - 1]) * alpha_seed_archive[k] * eta_set[j] - (sigma[seed] - sigma[j]) * alpha_seed_archive[k] * pi_archive_set[j * max_iter + (k - 1)];
             /* eta[sigma] = (beta_old / alpha_old) alpha[seed] eta[sigma] - (sigma[seed] - sigma[sigma]) alpha[seed] pi_old[sigma] */
-            pi_log_set[j * max_iter + k] = eta_set[j] + pi_log_set[j * max_iter + (k - 1)];    /* pi_new[sigma] <- eta[sigma] + pi_old[sigma] */
-            alpha_set[j] = (pi_log_set[j * max_iter + (k - 1)] / pi_log_set[j * max_iter + k]) * alpha_seed_log[k];     /* alpha[sigma] <- (pi_old[sigma] / pi_new[sigma]) alpha[seed] */
-            omega_set[j] = omega_seed_log[k] / (1.0 - omega_seed_log[k] * (sigma[seed] - sigma[j]));      /* omega[sigma] <- omega[0] / (1.0 + omega[0] * sigma) */
-            my_daxpy(vec_loc_size, omega_set[j] / (pi_log_set[j * max_iter + k] * zeta_set[j]), r_loc, &x_loc_set[j * vec_loc_size]);     /* x[sigma] <- x[sigma] + alpha[sigma] p[sigma] + omega[sigma] / (pi_new[sigma] zeta[sigma]) q */
+            pi_archive_set[j * max_iter + k] = eta_set[j] + pi_archive_set[j * max_iter + (k - 1)];    /* pi_new[sigma] <- eta[sigma] + pi_old[sigma] */
+            alpha_set[j] = (pi_archive_set[j * max_iter + (k - 1)] / pi_archive_set[j * max_iter + k]) * alpha_seed_archive[k];     /* alpha[sigma] <- (pi_old[sigma] / pi_new[sigma]) alpha[seed] */
+            omega_set[j] = omega_seed_archive[k] / (1.0 - omega_seed_archive[k] * (sigma[seed] - sigma[j]));      /* omega[sigma] <- omega[0] / (1.0 + omega[0] * sigma) */
+            my_daxpy(vec_loc_size, omega_set[j] / (pi_archive_set[j * max_iter + k] * zeta_set[j]), r_loc, &x_loc_set[j * vec_loc_size]);     /* x[sigma] <- x[sigma] + alpha[sigma] p[sigma] + omega[sigma] / (pi_new[sigma] zeta[sigma]) q */
             my_daxpy(vec_loc_size, alpha_set[j], &p_loc_set[j * vec_loc_size], &x_loc_set[j * vec_loc_size]);
-            my_daxpy(vec_loc_size, omega_set[j] / (alpha_set[j] * zeta_set[j] * pi_log_set[j * max_iter + k]), r_loc, &p_loc_set[j * vec_loc_size]);    /* p[sigma] <- p[sigma] + omega[sigma] / (alpha[sigma] zeta[sigma]) (q / pi_new[sigma] - r_old / pi_old[sigma]) */
-            my_daxpy(vec_loc_size, -omega_set[j] / (alpha_set[j] * zeta_set[j] * pi_log_set[j * max_iter + (k - 1)]), r_old_loc, &p_loc_set[j * vec_loc_size]);
-            zeta_set[j] = (1.0 - omega_seed_log[k] * (sigma[seed] - sigma[j])) * zeta_set[j];      /* zeta[sigma] <- (1.0 - omega[seed] (sigma[seed] - sigma[sigma])) * zeta[sigma] */
+            my_daxpy(vec_loc_size, omega_set[j] / (alpha_set[j] * zeta_set[j] * pi_archive_set[j * max_iter + k]), r_loc, &p_loc_set[j * vec_loc_size]);    /* p[sigma] <- p[sigma] + omega[sigma] / (alpha[sigma] zeta[sigma]) (q / pi_new[sigma] - r_old / pi_old[sigma]) */
+            my_daxpy(vec_loc_size, -omega_set[j] / (alpha_set[j] * zeta_set[j] * pi_archive_set[j * max_iter + (k - 1)]), r_old_loc, &p_loc_set[j * vec_loc_size]);
+            zeta_set[j] = (1.0 - omega_seed_archive[k] * (sigma[seed] - sigma[j])) * zeta_set[j];      /* zeta[sigma] <- (1.0 - omega[seed] (sigma[seed] - sigma[sigma])) * zeta[sigma] */
         }
-        my_daxpy(vec_loc_size, -omega_seed_log[k], y_loc, r_loc);            /* r <- q - omega[seed] y */
+        my_daxpy(vec_loc_size, -omega_seed_archive[k], y_loc, r_loc);            /* r <- q - omega[seed] y */
         dot_r = my_ddot(vec_loc_size, r_loc, r_loc); MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);  /* (r,r) */
         rTr_old = rTr;      /* r_old <- (r#,r) */
         rTr = my_ddot(vec_loc_size, r_hat_loc, r_loc); MPI_Iallreduce(MPI_IN_PLACE, &rTr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &rTr_req);  /* (r#,r) */
         MPI_Wait(&dot_r_req, MPI_STATUS_IGNORE);
         MPI_Wait(&rTr_req, MPI_STATUS_IGNORE);
 
-        beta_seed_log[k] = (alpha_seed_log[k] / omega_seed_log[k]) * (rTr / rTr_old);   /* beta[seed] <- (alpha[seed] / omega[seed]) ((r#,r)/(r#,r)) */
-        my_dscal(vec_loc_size, beta_seed_log[k], &p_loc_set[seed * vec_loc_size]);     /* p[seed] <- r + beta[seed] p[seed] - beta[seed] omega[seed] s */
+        beta_seed_archive[k] = (alpha_seed_archive[k] / omega_seed_archive[k]) * (rTr / rTr_old);   /* beta[seed] <- (alpha[seed] / omega[seed]) ((r#,r)/(r#,r)) */
+        my_dscal(vec_loc_size, beta_seed_archive[k], &p_loc_set[seed * vec_loc_size]);     /* p[seed] <- r + beta[seed] p[seed] - beta[seed] omega[seed] s */
         my_daxpy(vec_loc_size, 1.0, r_loc, &p_loc_set[seed * vec_loc_size]);
-        my_daxpy(vec_loc_size, -beta_seed_log[k] * omega_seed_log[k], s_loc, &p_loc_set[seed * vec_loc_size]);
+        my_daxpy(vec_loc_size, -beta_seed_archive[k] * omega_seed_archive[k], s_loc, &p_loc_set[seed * vec_loc_size]);
 
         for (j = 0; j < sigma_len; j++) {
             if (j == seed) continue;
             if (stop_flag[j]) continue;
-            beta_set[j] = (pi_log_set[j * max_iter + (k - 1)] / pi_log_set[j * max_iter + k]) * (pi_log_set[j * max_iter + (k - 1)] / pi_log_set[j * max_iter + k]) * beta_seed_log[k]; /* beta[sigma] <- (pi_old[sigma] / pi_new[sigma])^2 beta[seed] */
+            beta_set[j] = (pi_archive_set[j * max_iter + (k - 1)] / pi_archive_set[j * max_iter + k]) * (pi_archive_set[j * max_iter + (k - 1)] / pi_archive_set[j * max_iter + k]) * beta_seed_archive[k]; /* beta[sigma] <- (pi_old[sigma] / pi_new[sigma])^2 beta[seed] */
             my_dscal(vec_loc_size, beta_set[j], &p_loc_set[j * vec_loc_size]);      /* p[sigma] <- 1 / (pi_new[sigma] zeta[sigma]) r + beta[sigma] p[sigma] */
-            my_daxpy(vec_loc_size, 1.0 / (pi_log_set[j * max_iter + k] * zeta_set[j]), r_loc, &p_loc_set[j * vec_loc_size]);
+            my_daxpy(vec_loc_size, 1.0 / (pi_archive_set[j * max_iter + k] * zeta_set[j]), r_loc, &p_loc_set[j * vec_loc_size]);
         }
 
 #ifdef DISPLAY_SIGMA_RESIDUAL
@@ -370,7 +370,7 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
             if (j == seed) {
                 abs_zeta_pi = 1.0;
             } else {
-                abs_zeta_pi = fabs(1.0 / (zeta_set[j] * pi_log_set[j * max_iter + k]));
+                abs_zeta_pi = fabs(1.0 / (zeta_set[j] * pi_archive_set[j * max_iter + k]));
             }
 #ifdef DISPLAY_SIGMA_RESIDUAL
             if (myid == 0 && k % OUT_ITER == 0) printf("%e ", abs_zeta_pi * sqrt(dot_r / dot_zero));
@@ -395,27 +395,27 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
             if (myid == 0) printf("seed switching %d -> %d\n", seed, max_sigma);
 #endif
             for (i = 1; i <= k; i++) {
-                alpha_seed_log[i] = (pi_log_set[max_sigma * max_iter + (i - 1)] / pi_log_set[max_sigma * max_iter + i]) * alpha_seed_log[i];
-                beta_seed_log[i] = (pi_log_set[max_sigma * max_iter + (i - 1)] / pi_log_set[max_sigma * max_iter + i]) * (pi_log_set[max_sigma * max_iter + (i - 1)] / pi_log_set[max_sigma * max_iter + i]) * beta_seed_log[i];
-                omega_seed_log[i] = omega_seed_log[i] / (1.0 - omega_seed_log[i] * (sigma[seed] - sigma[max_sigma]));
+                alpha_seed_archive[i] = (pi_archive_set[max_sigma * max_iter + (i - 1)] / pi_archive_set[max_sigma * max_iter + i]) * alpha_seed_archive[i];
+                beta_seed_archive[i] = (pi_archive_set[max_sigma * max_iter + (i - 1)] / pi_archive_set[max_sigma * max_iter + i]) * (pi_archive_set[max_sigma * max_iter + (i - 1)] / pi_archive_set[max_sigma * max_iter + i]) * beta_seed_archive[i];
+                omega_seed_archive[i] = omega_seed_archive[i] / (1.0 - omega_seed_archive[i] * (sigma[seed] - sigma[max_sigma]));
             }
-            my_dscal(vec_loc_size, 1.0 / (zeta_set[max_sigma] * pi_log_set[max_sigma * max_iter + k]), r_loc);
+            my_dscal(vec_loc_size, 1.0 / (zeta_set[max_sigma] * pi_archive_set[max_sigma * max_iter + k]), r_loc);
 
             for (j = 0; j < sigma_len; j++) {
                 eta_set[j]    = 0.0;  /* eta[sigma]    <- 0 */
-                //pi_log_set[j * max_iter + 0] = 1.0;
+                //pi_archive_set[j * max_iter + 0] = 1.0;
                 zeta_set[j]   = 1.0;  /* zeta[sigma]   <- 1 */
             }
-            //alpha_seed_log[0] = 1.0;
-            //beta_seed_log[0]  = 0.0;
+            //alpha_seed_archive[0] = 1.0;
+            //beta_seed_archive[0]  = 0.0;
 
             for (i = 1; i <= k; i++) {
                 for (j = 0; j <= sigma_len; j++) {
                     if (stop_flag[j]) continue;
                     if (j == max_sigma) continue;
-                    eta_set[j] = (beta_seed_log[i - 1] / alpha_seed_log[i - 1]) * alpha_seed_log[i] * eta_set[j] - (sigma[max_sigma] - sigma[j]) * alpha_seed_log[i] * pi_log_set[j * max_iter + (i - 1)];
-                    pi_log_set[j * max_iter + i] = eta_set[j] + pi_log_set[j * max_iter + (i - 1)];
-                    zeta_set[j] = (1.0 - omega_seed_log[i] * (sigma[max_sigma] - sigma[j])) * zeta_set[j];
+                    eta_set[j] = (beta_seed_archive[i - 1] / alpha_seed_archive[i - 1]) * alpha_seed_archive[i] * eta_set[j] - (sigma[max_sigma] - sigma[j]) * alpha_seed_archive[i] * pi_archive_set[j * max_iter + (i - 1)];
+                    pi_archive_set[j * max_iter + i] = eta_set[j] + pi_archive_set[j * max_iter + (i - 1)];
+                    zeta_set[j] = (1.0 - omega_seed_archive[i] * (sigma[max_sigma] - sigma[j])) * zeta_set[j];
                 }
             }
 
@@ -450,7 +450,7 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
     free(r_old_loc); free(r_hat_loc); free(s_loc); free(y_loc);
     free(vec);
     free(p_loc_set); free(alpha_set); free(beta_set); free(omega_set); free(eta_set); free(zeta_set);
-    free(alpha_seed_log); free(beta_seed_log); free(omega_seed_log); free(pi_log_set);
+    free(alpha_seed_archive); free(beta_seed_archive); free(omega_seed_archive); free(pi_archive_set);
     free(stop_flag);
 
     return k;
