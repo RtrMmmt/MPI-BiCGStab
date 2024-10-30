@@ -410,7 +410,7 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
             //beta_seed_archive[0]  = 0.0;
 
             for (i = 1; i <= k; i++) {
-                for (j = 0; j <= sigma_len; j++) {
+                for (j = 0; j < sigma_len; j++) {
                     if (stop_flag[j]) continue;
                     if (j == max_sigma) continue;
                     eta_set[j] = (beta_seed_archive[i - 1] / alpha_seed_archive[i - 1]) * alpha_seed_archive[i] * eta_set[j] - (sigma[max_sigma] - sigma[j]) * alpha_seed_archive[i] * pi_archive_set[j * max_iter + (i - 1)];
