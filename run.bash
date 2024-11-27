@@ -4,4 +4,6 @@
 #PJM -L "node=16"
 #PJM --mpi "proc=64"
 #PJM -L "elapse=30:00"
-mpirun ./solver data/Transport.mtx bicgstab
+#PJM -o "output.out"
+#PJM -j
+mpirun ./solver data/Transport.mtx
