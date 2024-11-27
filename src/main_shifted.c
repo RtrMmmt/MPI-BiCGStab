@@ -7,11 +7,11 @@
 #include "shifted_switching_solver.h"
 
 #define DISPLAY_NODE_INFO   /* ノード数とプロセス数の表示 */
-#define DISPLAY_ERROR  /* 相対誤差の表示 */
+//#define DISPLAY_ERROR  /* 相対誤差の表示 */
 //#define SOLVE_EACH_SIGMA  /* 各システムでそれぞれ反復法を適用 */
 
-#define SIGMA_LENGTH 10
-#define SEED 5
+#define SIGMA_LENGTH 100
+#define SEED 1
 
 int main(int argc, char *argv[]) {
 
@@ -95,6 +95,7 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < sigma_len; ++i) {
         sigma[i] = (i + 1) * 0.01;
         //sigma[i] = (i + 1) * 0.1;
+        //sigma[i] = 0.01;
     }
     double *x_loc_set, *r_loc, *x, *r;
     int vec_size = A_info.rows;

@@ -3,19 +3,21 @@
 #define IDX(set, i, rows) ((set) + (i) * (rows))
 
 #define EPS 1.0e-12   /* 収束判定条件 */
-#define MAX_ITER 1000 /* 最大反復回数 */
+#define MAX_ITER 100 /* 最大反復回数 */
 
 #define MEASURE_TIME /* 時間計測 */
+#define MEASURE_SECTION_TIME /* セクション時間計測 */
 
-//#define DISPLAY_RESIDUAL /* 残差表示 */
-#define DISPLAY_SIGMA_RESIDUAL /* sigma毎の残差表示 */
+//#define DISPLAY_RESULT /* 結果表示 */
+//#define DISPLAY_RESIDUAL /* 途中の残差表示 */
+//#define DISPLAY_SIGMA_RESIDUAL /* 途中のsigma毎の残差表示 */
 #define OUT_ITER 1     /* 残差の表示間隔 */
 
 int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_info, double *x_loc_set, double *r_loc, double *sigma, int sigma_len, int seed) {
 
     int myid; MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
-#ifdef MEASURE_TIME
+#if defined(MEASURE_TIME) || defined(MEASURE_SECTION_TIME)
     double start_time, end_time, total_time;
 #endif
 
@@ -68,8 +70,10 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
 
     stop_flag   = (bool *)calloc(sigma_len, sizeof(bool)); /* Falseで初期化 */
 
-#ifdef MEASURE_TIME
-        start_time = MPI_Wtime();
+#ifdef MEASURE_SECTION_TIME
+        double seed_time, shift_time;
+        double section_start_time, section_end_time;
+        seed_time = 0; shift_time = 0;
 #endif
 
     rTr = my_ddot(vec_loc_size, r_loc, r_loc);      /* (r#,r) */
@@ -90,6 +94,10 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
     dot_r = rTr;    /* (r,r) */
     dot_zero = rTr; /* (r#,r#) */
     max_zeta_pi = 1.0;   /* max(|1/(zeta pi)|) */
+
+#if defined(MEASURE_TIME) || defined(MEASURE_SECTION_TIME)
+        start_time = MPI_Wtime();
+#endif
 
     while (stop_count < sigma_len && k < max_iter) {
 
@@ -115,6 +123,11 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
         omega_set[seed] = qTq / qTy;  /* omega[seed] <- (q,q)/(q,y) */
         my_daxpy(vec_loc_size, alpha_set[seed], &p_loc_set[seed * vec_loc_size], &x_loc_set[seed * vec_loc_size]);     /* x[seed] <- x[seed] + alpha[seed] p[seed] + omega[seed] q */
         my_daxpy(vec_loc_size, omega_set[seed], r_loc, &x_loc_set[seed * vec_loc_size]);
+
+#ifdef MEASURE_SECTION_TIME
+        section_start_time = MPI_Wtime();
+#endif
+
         for (j = 0; j < sigma_len; j++) {
             if (j == seed) continue;
             if (stop_flag[j]) continue;
@@ -129,6 +142,12 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
             my_daxpy(vec_loc_size, -omega_set[j] / (alpha_set[j] * zeta_set[j] * pi_old_set[j]), r_old_loc, &p_loc_set[j * vec_loc_size]);
             zeta_set[j] = (1.0 - omega_set[seed] * (sigma[seed] - sigma[j])) * zeta_set[j];      /* zeta[sigma] <- (1.0 - omega[seed] (sigma[seed] - sigma[sigma])) * zeta[sigma] */
         }
+
+#ifdef MEASURE_SECTION_TIME
+        section_end_time = MPI_Wtime();
+        shift_time += section_end_time - section_start_time;
+#endif
+
         my_daxpy(vec_loc_size, -omega_set[seed], y_loc, r_loc);            /* r <- q - omega[seed] y */
         dot_r = my_ddot(vec_loc_size, r_loc, r_loc); MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);  /* (r,r) */
         rTr_old = rTr;      /* r_old <- (r#,r) */
@@ -152,6 +171,11 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
 #ifdef DISPLAY_SIGMA_RESIDUAL
         if (myid == 0 && k % OUT_ITER == 0) printf("Iter %d : ", k);
 #endif
+
+#ifdef MEASURE_SECTION_TIME
+        section_start_time = MPI_Wtime();
+#endif
+
         for (j = 0; j < sigma_len; j++) {
             if (stop_flag[j]) {
 #ifdef DISPLAY_SIGMA_RESIDUAL
@@ -172,6 +196,12 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
                 stop_count++;
             }
         }
+
+#ifdef MEASURE_SECTION_TIME
+        section_end_time = MPI_Wtime();
+        shift_time += section_end_time - section_start_time;
+#endif
+
 #ifdef DISPLAY_SIGMA_RESIDUAL
         if (myid == 0 && k % OUT_ITER == 0) printf("\n");
 #endif
@@ -187,17 +217,27 @@ int shifted_lopbicgstab(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Mat
     }
 
 
-#ifdef MEASURE_TIME
+#if defined(MEASURE_TIME) || defined(MEASURE_SECTION_TIME)
         end_time = MPI_Wtime();
         total_time = end_time - start_time;
 #endif
 
+#ifdef MEASURE_SECTION_TIME
+    seed_time = total_time - shift_time;
+#endif
+
     if (myid == 0) {
-        printf("Total iter   : %d\n", k);
+#ifdef DISPLAY_RESIDUAL
+        printf("Total iter   : %d\n", k - 1);
         printf("Final r      : %e\n", sqrt(dot_r / dot_zero));
+#endif
 #ifdef MEASURE_TIME
         printf("Total time   : %e [sec.] \n", total_time);
         printf("Avg time/iter: %e [sec.] \n", total_time / k);
+#endif
+#ifdef MEASURE_SECTION_TIME
+        printf("Seed time    : %e [sec.]\n", seed_time);
+        printf("Shift time   : %e [sec.]\n", shift_time);
 #endif
     }
 
@@ -215,7 +255,7 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
 
     int myid; MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
-#ifdef MEASURE_TIME
+#if defined(MEASURE_TIME) || defined(MEASURE_SECTION_TIME)
     double start_time, end_time, total_time;
 #endif
 
@@ -275,8 +315,10 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
 
     stop_flag   = (bool *)calloc(sigma_len, sizeof(bool)); /* Falseで初期化 */
 
-#ifdef MEASURE_TIME
-        start_time = MPI_Wtime();
+#ifdef MEASURE_SECTION_TIME
+        double seed_time, shift_time, switch_time;
+        double section_start_time, section_end_time;
+        seed_time = 0; shift_time = 0; switch_time = 0;
 #endif
 
     rTr = my_ddot(vec_loc_size, r_loc, r_loc);      /* (r#,r) */
@@ -301,6 +343,14 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
     alpha_seed_archive[0] = 1.0;
     beta_seed_archive[0]  = 0.0;
 
+#if defined(MEASURE_TIME) || defined(MEASURE_SECTION_TIME)
+        start_time = MPI_Wtime();
+#endif
+
+#ifdef DISPLAY_SIGMA_RESIDUAL
+        if (myid == 0 && k % OUT_ITER == 0) printf("Seed : %d\n", seed);
+#endif
+
     while (stop_count < sigma_len && k < max_iter) {
 
         my_dcopy(vec_loc_size, r_loc, r_old_loc);       /* r_old <- r */
@@ -322,6 +372,11 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
         omega_seed_archive[k] = qTq / qTy;  /* omega[seed] <- (q,q)/(q,y) */
         my_daxpy(vec_loc_size, alpha_seed_archive[k], &p_loc_set[seed * vec_loc_size], &x_loc_set[seed * vec_loc_size]);     /* x[seed] <- x[seed] + alpha[seed] p[seed] + omega[seed] q */
         my_daxpy(vec_loc_size, omega_seed_archive[k], r_loc, &x_loc_set[seed * vec_loc_size]);
+
+#ifdef MEASURE_SECTION_TIME
+        section_start_time = MPI_Wtime();
+#endif
+
         for (j = 0; j < sigma_len; j++) {
             if (j == seed) continue;
             if (stop_flag[j]) continue;
@@ -336,6 +391,12 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
             my_daxpy(vec_loc_size, -omega_set[j] / (alpha_set[j] * zeta_set[j] * pi_archive_set[j * max_iter + (k - 1)]), r_old_loc, &p_loc_set[j * vec_loc_size]);
             zeta_set[j] = (1.0 - omega_seed_archive[k] * (sigma[seed] - sigma[j])) * zeta_set[j];      /* zeta[sigma] <- (1.0 - omega[seed] (sigma[seed] - sigma[sigma])) * zeta[sigma] */
         }
+
+#ifdef MEASURE_SECTION_TIME
+        section_end_time = MPI_Wtime();
+        shift_time += section_end_time - section_start_time;
+#endif
+
         my_daxpy(vec_loc_size, -omega_seed_archive[k], y_loc, r_loc);            /* r <- q - omega[seed] y */
         dot_r = my_ddot(vec_loc_size, r_loc, r_loc); MPI_Iallreduce(MPI_IN_PLACE, &dot_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &dot_r_req);  /* (r,r) */
         rTr_old = rTr;      /* r_old <- (r#,r) */
@@ -347,6 +408,10 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
         my_dscal(vec_loc_size, beta_seed_archive[k], &p_loc_set[seed * vec_loc_size]);     /* p[seed] <- r + beta[seed] p[seed] - beta[seed] omega[seed] s */
         my_daxpy(vec_loc_size, 1.0, r_loc, &p_loc_set[seed * vec_loc_size]);
         my_daxpy(vec_loc_size, -beta_seed_archive[k] * omega_seed_archive[k], s_loc, &p_loc_set[seed * vec_loc_size]);
+
+#ifdef MEASURE_SECTION_TIME
+        section_start_time = MPI_Wtime();
+#endif
 
         for (j = 0; j < sigma_len; j++) {
             if (j == seed) continue;
@@ -389,10 +454,19 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
         if (myid == 0 && k % OUT_ITER == 0) printf("\n");
 #endif
 
+#ifdef MEASURE_SECTION_TIME
+        section_end_time = MPI_Wtime();
+        shift_time += section_end_time - section_start_time;
+#endif
+
+#ifdef MEASURE_SECTION_TIME
+        section_start_time = MPI_Wtime();
+#endif
+
         /* seed switching */
         if (stop_flag[seed] && stop_count < sigma_len) {
 #ifdef DISPLAY_SIGMA_RESIDUAL
-            if (myid == 0) printf("seed switching %d -> %d\n", seed, max_sigma);
+            if (myid == 0) printf("Seed : %d\n", max_sigma);
 #endif
             for (i = 1; i <= k; i++) {
                 alpha_seed_archive[i] = (pi_archive_set[max_sigma * max_iter + (i - 1)] / pi_archive_set[max_sigma * max_iter + i]) * alpha_seed_archive[i];
@@ -422,6 +496,11 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
             seed = max_sigma;
         }
 
+#ifdef MEASURE_SECTION_TIME
+        section_end_time = MPI_Wtime();
+        switch_time += section_end_time - section_start_time;
+#endif
+
         k++;
 
 #ifdef DISPLAY_RESIDUAL
@@ -433,17 +512,28 @@ int shifted_lopbicgstab_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd
     }
 
 
-#ifdef MEASURE_TIME
-        end_time = MPI_Wtime();
-        total_time = end_time - start_time;
+#if defined(MEASURE_TIME) || defined(MEASURE_SECTION_TIME)
+    end_time = MPI_Wtime();
+    total_time = end_time - start_time;
+#endif
+
+#ifdef MEASURE_SECTION_TIME
+    seed_time = total_time - shift_time - switch_time;
 #endif
 
     if (myid == 0) {
-        printf("Total iter   : %d\n", k);
+#ifdef DISPLAY_RESIDUAL
+        printf("Total iter   : %d\n", k - 1);
         printf("Final r      : %e\n", sqrt(dot_r / dot_zero));
+#endif
 #ifdef MEASURE_TIME
         printf("Total time   : %e [sec.] \n", total_time);
         printf("Avg time/iter: %e [sec.] \n", total_time / k);
+#endif
+#ifdef MEASURE_SECTION_TIME
+        printf("Seed time    : %e [sec.]\n", seed_time);
+        printf("Shift time   : %e [sec.]\n", shift_time);
+        printf("Switch time  : %e [sec.]\n", switch_time);
 #endif
     }
 
