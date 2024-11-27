@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    for (int sigma_len = MIN_SIGMA_LENGTH; sigma_len <= MAX_SIGMA_LENGTH; sigma_len *= 2) {
+    for (int sigma_len = MIN_SIGMA_LENGTH; sigma_len <= MAX_SIGMA_LENGTH; sigma_len *= SIGMA_LENGTH_STEP) {
 
         double sigma[sigma_len];
         int seed = SEED;
