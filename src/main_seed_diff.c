@@ -10,8 +10,10 @@
 #define DISPLAY_ERROR  /* 相対誤差の表示 */
 //#define SOLVE_EACH_SIGMA  /* 各システムでそれぞれ反復法を適用 */
 
+#define MIN_SIGMA_LENGTH 8
 #define MAX_SIGMA_LENGTH 512
-#define SEED 0
+#define SIGMA_LENGTH_STEP 4
+#define SEED 1
 
 int main(int argc, char *argv[]) {
 
@@ -87,15 +89,15 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    for (int sigma_len = 1; sigma_len <= MAX_SIGMA_LENGTH; sigma_len *= 2) {
+    for (int sigma_len = MIN_SIGMA_LENGTH; sigma_len <= MAX_SIGMA_LENGTH; sigma_len *= 2) {
 
         double sigma[sigma_len];
         int seed = SEED;
 
         for (int i = 0; i < sigma_len; ++i) {
-            //sigma[i] = (i + 1) * 0.01;
+            sigma[i] = (i + 1) * 0.01;
             //sigma[i] = (i + 1) * 0.1;
-            sigma[i] = 0.01;
+            //sigma[i] = 0.01;
         }
         double *x_loc_set, *r_loc, *x, *r;
         int vec_size = A_info.rows;
@@ -125,8 +127,8 @@ int main(int argc, char *argv[]) {
 
         int total_iter;
         /* 実行 */
-        total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
-        //total_iter = shifted_lopbicgstab_switching(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+        //total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+        total_iter = shifted_lopbicgstab_switching(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
 
         free(x_loc_set); free(r_loc); free(x); free(r);
     }
