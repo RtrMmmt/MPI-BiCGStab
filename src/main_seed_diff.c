@@ -2,6 +2,8 @@
  * macでのコンパイルと実行コマンド
  * mpicc -O3 src/main_shifted.c src/shifted_switching_solver.c src/matrix.c src/vector.c src/mmio.c -I src -lm
  * mpirun -np 4 ./a.out data/atmosmodd.mtx
+ * 
+ * シフト方程式の数を変えて実行する
  ******************************************************************************/
 
 #include "shifted_switching_solver.h"
@@ -95,9 +97,10 @@ int main(int argc, char *argv[]) {
         int seed = SEED;
 
         for (int i = 0; i < sigma_len; ++i) {
-            sigma[i] = (i + 1) * 0.01;
+            //sigma[i] = (i + 1) * 0.01;
             //sigma[i] = (i + 1) * 0.1;
             //sigma[i] = 0.01;
+            sigma[i] = 0.01 + i * (0.01 / sigma_len);
         }
         double *x_loc_set, *r_loc, *x, *r;
         int vec_size = A_info.rows;
@@ -127,8 +130,12 @@ int main(int argc, char *argv[]) {
 
         int total_iter;
         /* 実行 */
-        //total_iter = shifted_lopbicgstab(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
-        total_iter = shifted_lopbicgstab_switching(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+        //total_iter = shifted_lopbicg(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+        total_iter = shifted_lopbicg_switching(A_loc_diag, A_loc_offd, &A_info, x_loc_set, r_loc, sigma, sigma_len, seed);
+
+        if (myid == 0) {
+            printf("Total iter   : %d\n", total_iter);
+        }
 
         free(x_loc_set); free(r_loc); free(x); free(r);
     }
