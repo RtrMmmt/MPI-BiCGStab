@@ -517,6 +517,7 @@ int shifted_lopbicg_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, IN
             }
 
             seed = max_sigma;
+            if (myid == 0) printf("k: %d, seed: %d\n", k, seed);
         }
 
 #ifdef MEASURE_SECTION_TIME
@@ -584,7 +585,7 @@ int shifted_lopbicg_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, IN
         double rerative_error = sqrt(global_diff_norm_2) / sqrt(global_ans_norm_2); //ノルムで相対誤差を計算
         if (myid == 0) {
             if (i == seed) printf("0, %e, %e\n", sigma[i], rerative_error);
-            else /*if (i % 10 == 0)*/ printf("1, %e, %e\n", sigma[i], rerative_error);
+            else if (i % 100 == 0) printf("1, %e, %e\n", sigma[i], rerative_error);
         }
     }
     free(ans_loc);
