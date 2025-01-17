@@ -517,7 +517,7 @@ int shifted_lopbicg_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, IN
             }
 
             seed = max_sigma;
-            if (myid == 0) printf("k: %d, seed: %d\n", k, seed);
+            if (myid == 0) printf("k: %d, seed: %d, remain: %d\n", k, seed, sigma_len - stop_count);
         }
 
 #ifdef MEASURE_SECTION_TIME
