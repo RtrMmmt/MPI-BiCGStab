@@ -516,6 +516,12 @@ int shifted_lopbicg_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, IN
                 }
             }
 
+            for (j = 0; j < sigma_len; j++) {
+                if (stop_flag[j]) continue;
+                if (j == max_sigma) continue;
+                if (myid == 0) printf("sigma[%d] eta: %f, pi: %f, zeta: %f\n", j, eta_set[j], pi_archive_set[j * max_iter + k], zeta_set[j]);
+            }
+
             seed = max_sigma;
             if (myid == 0) printf("k: %d, seed: %d, remain: %d\n", k, seed, sigma_len - stop_count);
         }
@@ -585,7 +591,7 @@ int shifted_lopbicg_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, IN
         double rerative_error = sqrt(global_diff_norm_2) / sqrt(global_ans_norm_2); //ノルムで相対誤差を計算
         if (myid == 0) {
             if (i == seed) printf("0, %e, %e\n", sigma[i], rerative_error);
-            else if (i % 100 == 0) printf("1, %e, %e\n", sigma[i], rerative_error);
+            else if (i % 10 == 0) printf("1, %e, %e\n", sigma[i], rerative_error);
         }
     }
     free(ans_loc);
