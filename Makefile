@@ -12,7 +12,7 @@ FFLAGS		=
 # ----------------------------------------------------------------
 # sources and objects
 
-C_SRC		= src/main_shifted.c src/shifted_switching_solver.c src/matrix.c src/vector.c src/mmio.c
+C_SRC		= src/main_repeat.c src/shifted_switching_solver.c src/matrix.c src/vector.c src/mmio.c
 F_SRC		= 
 
 C_OBJ		= $(C_SRC:.c=.o)
