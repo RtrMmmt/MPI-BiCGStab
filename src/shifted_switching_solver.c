@@ -9,12 +9,12 @@
 //#define MEASURE_SECTION_TIME // セクション時間計測
 //#define DISPLAY_SECTION_TIME // セクション時間表示
 
-#define DISPLAY_RESULT // 結果表示 
+//#define DISPLAY_RESULT // 結果表示 
 //#define DISPLAY_RESIDUAL // 途中の残差表示 
 //#define DISPLAY_SIGMA_RESIDUAL // 途中のsigma毎の残差表示 
 #define OUT_ITER 1     // 残差の表示間隔 
 
-#define DISPLAY_ERROR
+//#define DISPLAY_ERROR
 
 
 int shifted_lopbicg(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, INFO_Matrix *A_info, double *x_loc_set, double *r_loc, double *sigma, int sigma_len, int seed) {
@@ -553,10 +553,10 @@ int shifted_lopbicg_switching(CSR_Matrix *A_loc_diag, CSR_Matrix *A_loc_offd, IN
 
     if (myid == 0) {
 #ifdef DISPLAY_RESIDUAL
-        printf("Total iter   : %d\n", k - 1);
         printf("Final r      : %e\n", sqrt(dot_r / dot_zero));
 #endif
 #ifdef MEASURE_TIME
+        printf("Total iter   : %d\n", k - 1);
         printf("Total time   : %e [sec.] \n", total_time);
         printf("Avg time/iter: %e [sec.] \n", total_time / k);
 #endif
